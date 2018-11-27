@@ -1,0 +1,416 @@
+library (tolerance)
+library (plyr)
+library (EnvStats)
+
+
+folder = "C:\\Users\\ngpc4\\Documents\\FusionB\\AnalyticalSpecificity\\"
+
+filename = "C:\\Users\\ngpc4\\Documents\\FusionB\\EDTA_EtOH_combined.csv"
+
+
+# READ IN DATA
+
+whole_df <- read.csv (filename, header=TRUE)
+whole_df[,"UniqueID"] = paste (whole_df[,"Run"],whole_df[,"Well"])
+
+# remove more problematic wells
+df_problem <- read.csv ("C:\\Users\\ngpc4\\Documents\\FusionB\\wells_to_exclude.csv", header=TRUE)
+problem_samples <- paste (df_problem[,"Run"], df_problem[,"Well"])
+whole_df <- whole_df[!(whole_df$UniqueID %in% problem_samples), ]
+
+
+## READ IN DATA
+# OPTION 1
+chemical = "EDTA"
+EDTA_runs <- c("VP-3005-002_P05_F04_001_R00", "VP-3005-002_P05_F04_002_R00", "VP-3005-002_P05_F04_003_R00", "VP-3005-002_P05_F04_004_R00")
+df <- whole_df[whole_df$Run %in% EDTA_runs,]
+df[df$Run %in% EDTA_runs, "Chemical"] <- "EDTA"
+
+
+
+
+# OPTION 2
+#chemical = "Ethanol"
+#EtOH_runs <- c("VP-3005-002_P05_F02_001_R00","VP-3005-002_P05_F02_002_R00","VP-3005-002_P05_F02_003_R00", "VP-3005-002_P05_F02_004_R00")
+#df <- whole_df[whole_df$Run %in% EtOH_runs,]
+#df[df$Run %in% EtOH_runs, "Chemical"] <- "Ethanol"
+
+
+folder = paste (folder, "\\", chemical, "\\", sep="")
+
+
+
+# replaced NaN for 43 otherwise t.test isn't possible. 
+# could have focused on just HEX but wanted to make sure that the other channels were truly NaN
+# Sample_no_number is what I did by hand to put things in computer-readable format
+
+df <- df[df$Sample != 'PC' & df$Sample != 'NTC',]   # drop PC and NTC - just looking at effect of the chemical
+ 
+
+df["Spikein_Level"] <- vector ( ,length=nrow (df))
+
+EtOH_conc <- c(4, 2, 1, 0.5, 0.25, 0.125, 0.063, 0.031, 0.016, 0)
+EDTA_conc <- c(20, 10, 5, 2.5, 1.25, 0.625, 0.313,0.156, 0.078,0)
+
+# choose appropriate chemical
+if (chemical == "EDTA") {
+	chem_conc <- EDTA_conc
+	#df <- df[df$Sample_no_number == 'PC2_EDTA' | df$Sample_no_number == 'WT High' | df$Sample_no_number == 'WT Low' | df$Sample_no_number == 'NTC_EDTA',]
+} else if (chemical == "Ethanol") {
+	chem_conc <- EtOH_conc
+	#df <- df[df$Sample_no_number == 'PC-E' | df$Sample_no_number == 'WT-high-E' | df$Sample_no_number == 'WT-Low-E' | df$Sample_no_number == 'NTC-E',]
+}
+
+
+df[df$Content == "Unkn-01", "Spikein_Level"] = chem_conc[1] 
+df[df$Content == "Unkn-02", "Spikein_Level"] = chem_conc[2] 
+df[df$Content == "Unkn-03", "Spikein_Level"] = chem_conc[3] 
+df[df$Content == "Unkn-04", "Spikein_Level"] = chem_conc[4]
+df[df$Content == "Unkn-05", "Spikein_Level"] = chem_conc[5] 
+df[df$Content == "Unkn-06", "Spikein_Level"] = chem_conc[6]
+df[df$Content == "Unkn-07", "Spikein_Level"] = chem_conc[7] 
+df[df$Content == "Unkn-08", "Spikein_Level"] = chem_conc[8]
+df[df$Content == "Unkn-09", "Spikein_Level"] = chem_conc[9] 
+df[df$Content == "Unkn-10", "Spikein_Level"] = chem_conc[10]
+
+
+#levels(droplevels(df$Content)) # this does nothing
+#levels(droplevels(df$Sample_no_number)) 
+df$Sample_no_number <- factor (df$Sample_no_number)
+df$Content <- factor (df$Content)
+
+
+# asign new names 
+# This MUST come after when PC and NTC have been dropped
+df[df$Sample_no_number=="NTC-E", "SampleType2"] = "NTC sample"
+df[df$Sample_no_number=="NTC-EDTA", "SampleType2"] = "NTC sample"
+
+df[df$Sample_no_number=="PC-E", "SampleType2"] = "PC sample"
+df[df$Sample_no_number=="PC-EDTA", "SampleType2"] = "PC sample"
+
+df[df$Sample_no_number=="WT-high-E", "SampleType2"] = "WT Total RNA Standard (High) sample"
+df[df$Sample_no_number=="WThigh-EDTA", "SampleType2"] = "WT Total RNA Standard (High) sample"
+df[df$Sample_no_number=="WT-High-E", "SampleType2"] = "WT Total RNA Standard (High) sample"
+
+df[df$Sample_no_number=="WT-Low-E", "SampleType2"] = "WT Total RNA Standard (Low) sample"
+df[df$Sample_no_number=="WTLowEDTA", "SampleType2"] = "WT Total RNA Standard (Low) sample"
+
+
+
+clean_sample_name <- function (sampletype) {
+	if (sampletype == "PC2_EDTA") {
+		sampletype = "PC"
+	}
+	if (sampletype == "NTC_EDTA") {
+		sampletype = "NTC"
+	}
+	return (sampletype)
+}
+
+ttest_function <- function (df, controls) { 
+	if (nrow(df) == 0  ) {
+		print ("empty df")
+		return
+	}
+	if (nrow (controls) == 0) {
+		print ("empty controls")
+		return
+	}
+	fluor <- df$Fluor[1]
+	sampletype <- df$Sample_no_number[1]
+	controls_for_fluor <- controls[controls$Fluor == fluor & controls$Sample_no_number == sampletype,]
+	num_controls <- nrow (controls_for_fluor)
+	num_exp_group <- nrow (df)
+	obj<-try(t.test (df$Cq, controls_for_fluor$Cq), silent=TRUE)
+	if (is(obj, "try-error")) {
+		return(c(-1,-1, mean (df[,"Cq"]), num_exp_group, mean (controls_for_fluor[,"Cq"]), num_controls,-1))
+	}
+       ttest <- t.test (df$Cq, controls_for_fluor$Cq)
+       names (ttest)  # possible values
+       # return statistic, p-value, mean of x and mean of y
+       results <- c(ttest$statistic, ttest$p.value, ttest$estimate[1], num_exp_group, ttest$estimate[2], num_controls)
+      # return (round(results,2))
+	return (c(round(results,2), ttest$p.value))
+}
+
+mann_whitney_function <- function (df, controls) {
+	if (nrow(df) == 0 || nrow (controls == 0) ) {
+		#print ("empty df or controls")
+		return
+	}
+	fluor <- df$Fluor[1]
+	sampletype <- df$Sample_no_number[1]
+	controls_for_fluor <- controls[controls$Fluor == fluor & controls$Sample_no_number == sampletype,]
+	num_controls <- nrow (controls_for_fluor)
+	num_exp_group <- nrow (df)
+	obj<-try(wilcox.test (df$Cq, controls_for_fluor$Cq, paired=FALSE))
+	if (is(obj, "try-error")) {
+		return(c(-1,-1, mean (df[,"Cq"]), num_exp_group, mean (controls_for_fluor[,"Cq"]), num_controls))
+	}
+       wilcox_test <- wilcox.test (df$Cq, controls_for_fluor$Cq, paired=FALSE)
+       names (wilcox_test)  # possible values
+       # return statistic, p-value, mean of x and mean of y
+       results <- c(wilcox_test$statistic, wilcox_test$p.value)
+       return (results)
+}
+
+
+# remove outliers
+#source("https://goo.gl/4mthoF")
+outlierKD <- function(dt) {
+  
+  var_name <- eval(substitute(Cq),eval(dt))
+  tot <- sum(!is.na(var_name))
+  na1 <- sum(is.na(var_name))
+  m1 <- mean(var_name, na.rm = T)
+  par(mfrow=c(2, 2), oma=c(0,0,3,0))
+  boxplot(var_name, main="With outliers")
+  hist(var_name, main="With outliers", xlab=NA, ylab=NA)
+  outlier <- boxplot.stats(var_name)$out
+  cleaned_dt <- dt[!(dt$Cq %in% outlier), ] 
+  return (cleaned_dt)
+
+#  mo <- mean(outlier)
+#  var_name <- ifelse(var_name %in% outlier, NA, var_name)
+#  boxplot(var_name, main="Without outliers")
+#  hist(var_name, main="Without outliers", xlab=NA, ylab=NA)
+#  title("Outlier Check", outer=TRUE)
+#  na2 <- sum(is.na(var_name))
+#  message("Outliers identified: ", na2 - na1, " from ", tot, " observations")
+#  message("Proportion (%) of outliers: ", (na2 - na1) / tot*100)
+#  message("Mean of the outliers: ", mo)
+#  m2 <- mean(var_name, na.rm = T)
+#  message("Mean without removing outliers: ", m1)
+#  message("Mean if we remove outliers: ", m2)
+  
+ # response <- readline(prompt="Do you want to remove outliers and to replace with NA? [yes/no]: ")
+ # if(response == "y" | response == "yes"){
+ #   dt[as.character(substitute(var))] <- invisible(var_name)
+ #   assign(as.character(as.list(match.call())$dt), dt, envir = .GlobalEnv)
+ #   message("Outliers successfully removed", "\n")
+ #   return(invisible(dt))
+ # } else{
+  #  message("Nothing changed", "\n")
+  #  return(invisible(var_name))
+ # }
+}
+
+summary_function <- function (df) {
+	cleaned_df <- df[!is.na(df$Cq) & df$Cq != "NaN",]
+        count <- nrow (cleaned_df)
+	missing <- nrow (df[is.na(df$Cq) | df$Cq == "NaN",])
+	results <- data.frame (matrix (ncol=5,nrow=1))
+	colnames (results) <- c("Number of observations", "Number of missing", "Mean", "SD", "CV")
+        if (count == 0) {
+		results[1,] <- c(count, missing, NA, NA, NA)
+		return (results)
+	}
+#print (count)
+       mean <- mean (cleaned_df$Cq)
+	median <- median (cleaned_df$Cq)
+	sd <- sd (cleaned_df$Cq)
+	cv <- sd/mean
+               
+	percentiles <- quantile(cleaned_df$Cq, probs = c(0.01, 0.05, 0.1, 0.90, .95, .99))
+	min <- min (cleaned_df$Cq)
+	max <- max (cleaned_df$Cq)
+	
+	
+
+	results[1,] <- c(count, missing, mean, sd, cv)
+	return (results) 
+}
+
+shapiro_normality_test <- function (df) {
+	if (nrow (df) == 0) {
+		return (c(NA, NA))
+	}
+	obj<-try( shapiro.test(df$Cq), silent=TRUE)
+	if (is(obj, "try-error")) {
+		return(c (1, "No")) 
+	}
+	res <- shapiro.test(df$Cq)
+	significant <- "No"
+	if (res$p.value < 0.05) {
+		significant <- "Yes"
+	} 
+	return ( c(res$p.value, significant))
+}
+
+summary_all_data <- ddply (df, c('Fluor', 'Spikein_Level', 'Sample_no_number'), .fun=summary_function)
+summary_data_filename = paste (folder, "Summary_stats_", chemical, ".csv", sep="")
+write.csv (summary_all_data, file = summary_data_filename, row.names=TRUE)
+
+cleaned_df <- df[!is.na(df$Cq),]
+
+#df_no_outliers <- ddply (cleaned_df, c('Fluor', 'Spikein_Level', 'Sample_no_number'), .fun=outlierKD)
+
+summary_cleaned_data <- ddply (df, c('Fluor', 'Spikein_Level', 'Sample_no_number'), .fun=summary_function)
+#ddply (df_no_outliers, c('Fluor', 'Spikein_Level', 'Sample_no_number'), .fun= shapiro_normality_test)
+
+df_control = cleaned_df[cleaned_df$Content == "Unkn-10",]  # this is the control
+if (nrow (df_control) > 0) {
+	wilcox_results <- ddply (cleaned_df, c('Fluor', 'Spikein_Level', 'Sample_no_number'), .fun = mann_whitney_function, controls=df_control ) 
+
+	mann_whitney_results_filename = paste (folder, "Mann-Whitney_", chemical, ".csv")
+	write.csv(wilcox_results, file = mann_whitney_results_filename,row.names=TRUE)
+
+	ttest_results <- ddply (cleaned_df, c('Fluor', 'Spikein_Level', 'Sample_no_number'), .fun = ttest_function, controls=df_control ) 
+	x <- c ("Fluor", "Spikein Concentration", "Sample type", "t-statistic", "P value",  "Mean of spike-in", "N Spike-ins", "Mean of control", "N controls")
+colnames (ttest_results) <- x
+
+	t_results_filename = paste (folder, "t-test_", chemical, ".csv")
+	write.csv(ttest_results, file = t_results_filename,row.names=TRUE)
+}
+
+# Boxplot of differences OPTIONAL
+fluors <- levels (df$Fluor)
+sample_types <- levels (df$Sample_no_number)
+
+for (sampletype in sample_types) {
+for (fluor in fluors) {
+	subset_df <- cleaned_df[cleaned_df$Fluor == fluor & cleaned_df$Sample_no_number == sampletype,]
+	if (nrow (subset_df) > 0) {
+		sampleType2 <-  subset_df$SampleType2[1]
+		title = paste (chemical, " effect on ", sampleType2 , " " , fluor, " Ct Value", sep="")
+		print (title)
+		xlabel = paste (chemical, " Concentration")
+		plot_filename = paste (folder, chemical, "_", sampletype, "_", fluor, ".png", sep="")
+		png(filename=plot_filename)
+		boxplot(Cq~Spikein_Level,data=subset_df , main=title, xlab=xlabel, ylab="Ct value")
+		dev.off()
+	}
+}
+}
+
+
+
+
+
+
+# Calculate deltaCq
+
+
+ttest_function_deltaCq <- function (df, controls) { 
+	sampletype <- df$Sample_no_number[1]
+	controls_for_fluor <- controls[controls$Sample_no_number == sampletype,]
+	num_controls <- nrow (controls_for_fluor)
+	num_exp_group <- nrow (df)
+	if (num_exp_group == 0 || num_controls == 0) {
+		return (c(NA, NA, NA, NA, NA, NA))
+	}
+	obj<-try(t.test (df$deltaCq, controls_for_fluor$deltaCq), silent=TRUE)
+	if (is(obj, "try-error")) {
+		return(c(NA,NA, mean (df[,"deltaCq"]), num_exp_group, mean (controls_for_fluor[,"deltaCq"]), num_controls, NA))
+	}
+       ttest <- t.test (df$deltaCq, controls_for_fluor$deltaCq)
+       names (ttest)  # possible values
+       # return statistic, p-value, mean of x and mean of y
+       results <- c(ttest$statistic, ttest$p.value, ttest$estimate[1], num_exp_group, ttest$estimate[2], num_controls)
+       return (c(round(results,2), ttest$p.value))
+}
+
+
+# Calculate deltaCq
+
+
+df_TexasRed <- df[df$Fluor == "Texas Red", c("UniqueID", "Fluor", "Target", "Sample", "Spikein_Level", "Sample_no_number", "Content", "Cq")]
+df_FAM <- df[df$Fluor == "FAM", c("UniqueID", "Fluor", "Cq")]
+
+channels <- merge (df_TexasRed ,df_FAM, by="UniqueID")
+channels[,"deltaCq"] <- channels["Cq.y"] - channels["Cq.x"]
+channels_control = channels[channels$Content == "Unkn-10",]  # this is the control
+
+# asign new names (per Cheuk Ka March 13, 2018)
+# This MUST come after when PC and NTC have been dropped
+channels[channels$Sample_no_number=="NTC-E", "SampleType2"] = "NTC sample"
+channels[channels$Sample_no_number=="NTC-EDTA", "SampleType2"] = "NTC sample"
+
+channels[channels$Sample_no_number=="PC-E", "SampleType2"] = "PC sample"
+channels[channels$Sample_no_number=="PC-EDTA", "SampleType2"] = "PC sample"
+
+channels[channels$Sample_no_number=="WT-high-E", "SampleType2"] = "WT Total RNA Standard (High) sample"
+channels[channels$Sample_no_number=="WThigh-EDTA", "SampleType2"] = "WT Total RNA Standard (High) sample"
+channels[channels$Sample_no_number=="WT-High-E", "SampleType2"] = "WT Total RNA Standard (High) sample"
+
+channels[channels$Sample_no_number=="WT-Low-E", "SampleType2"] = "WT Total RNA Standard (Low) sample"
+channels[channels$Sample_no_number=="WTLowEDTA", "SampleType2"] = "WT Total RNA Standard (Low) sample"
+
+#### PLOTS
+#sample_types <- levels (df$Sample_no_number)
+sample_types <- levels (factor(channels$SampleType2))
+
+for (sampletype in sample_types) {
+	subset_df <- channels[channels$SampleType2 == sampletype,]
+	subset_df <- subset_df[!is.na(subset_df$deltaCq),]
+
+	if (nrow (subset_df) > 0) {
+#old	title = paste (chemical, " effect on ", sampletype, deltaCt_symbol )
+	title= bquote (.(chemical) ~ effect ~ on ~ .(sampletype) ~ Delta*Ct ~ values)
+
+	#title= bquote (.(chemical) ~ effect ~ on ~ .(sampletype) ~ Delta*Ct ~ values)
+	if (chemical == "EDTA") {
+		xlabel = paste (chemical, " Concentration (mM)");
+	} else {
+		xlabel = paste (chemical, " Concentration (%)");
+	}
+	print (sampletype)
+	ylabel = expression(paste(Delta, "Ct"))
+	plot_filename = paste (folder, chemical, "_", sampletype, "_deltaCt.png", sep="")
+	png(filename=plot_filename)
+	boxplot(deltaCq~Spikein_Level,data= subset_df, 
+	main= bquote (.(chemical) ~ effect ~ on ~ .(sampletype) ~ Delta*Ct ~ values),
+	xlab=xlabel, ylab=ylabel)
+	dev.off()
+	}
+}
+
+
+
+
+# don't want to plot the last point
+
+filtered_chan <- channels[channels$Spikein_Level!=20,]
+filtered_chan <- channels
+
+#sample_types <- levels (df$Sample_no_number)
+for (sampletype in sample_types) {
+	#title= bquote (.(chemical) ~ effect ~ on ~ .(sampletype) ~ Delta*Ct ~ values)
+	if (chemical == "EDTA") {
+		xlabel = paste (chemical, " Concentration (mM)");
+	} else {
+		xlabel = paste (chemical, " Concentration (%)");
+	}
+subset_filtered_chan <- filtered_chan[filtered_chan$SampleType2 == sampletype,]
+	subset_filtered_chan <- subset_filtered_chan[!is.na(subset_filtered_chan$deltaCq),]
+	if (nrow (subset_filtered_chan) > 0) {
+	ylabel = expression(paste(Delta, "Ct"))
+	plot_filename = paste (folder, chemical, "_", sampletype, "_deltaCq.png", sep="")
+	png(filename=plot_filename)
+	boxplot(deltaCq~Spikein_Level,data= subset_filtered_chan, 
+	main = bquote (.(chemical) ~ effect ~ on ~ .(sampletype) ~ Delta*Ct ~ values),
+	 xlab=xlabel, ylab=ylabel)
+	dev.off()
+	}
+}
+
+
+#### T-TEST
+
+
+ttest_results <- ddply (channels, c('Spikein_Level', 'Sample_no_number'), .fun = ttest_function_deltaCq, controls=channels_control ) 
+x <- c ("Spikein Concentration", "Sample type", "t-statistic", "P value",  "Mean of spike-in", "N Spike-ins", "Mean of control", "N controls")
+colnames (ttest_results) <- x
+
+t_results_filename = paste (folder, "t-test_for_deltaCq", chemical, ".csv")
+write.csv(ttest_results, file = t_results_filename,row.names=TRUE)
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,208 @@
+library (tolerance)
+library (plyr)
+library (EnvStats)
+library (ggplot2)
+library (car)
+
+
+## READ IN DATA. BROAD RANGE USES SAME DATA AS REPORTABLE RANGE
+filename = "C:\\Users\\ngpc4\\Documents\\FusionB\\LoD\\LoD_Narrow_Range_Fresh\\narrowRangeFresh_combined.csv"
+folder = "C:\\Users\\ngpc4\\Documents\\FusionB\\LoD\\LoD_Narrow_Range_Fresh\\"
+
+df <- read.csv (filename, header=TRUE)
+
+
+df[,"UniqueID"] = paste (df[,"Run"],df[,"Well"])
+
+unique_id_list = unique (df[,"UniqueID"])
+
+wells_to_remove_df <- read.csv ("C:\\Users\\ngpc4\\Documents\\FusionB\\wells_to_exclude.csv", header=TRUE)
+wells_to_remove_df[,"UniqueID"] = paste (wells_to_remove_df[,"Run"], wells_to_remove_df[,"Well"])
+df <- df[!(df$UniqueID %in% wells_to_remove_df[,"UniqueID"]), ] 
+
+
+
+#negative_control <- df[df$Sample == "NTC",]
+#summary_negative_controls <- ddply (negative_control, c('Fluor'), .fun=summary_function)
+
+# remove PC and NTC
+df <- df[df$Content != 'PC' & df$Content != 'NTC' & df$Sample != 'PC1' & df$Sample != 'PC4' & df$Sample != 'NTC' &df$Content != "Pos Ctrl-1",]   # drop PC and NTC - just looking at effect of the dilution
+10
+df["Fusion_Concentration"] <- vector ( ,length=nrow (df))
+
+conc <- c(8.80, 6.22, 4.40, 3.11, 2.20, 1.56, 1.10, 0.78, 0.55,0.39)
+
+# assign concentrations, need to check
+df[df$Sample == "%Fusion Dil 1", "Final_Percentage_Fusion"] = conc[1] 
+df[df$Sample == "%Fusion Dil 2", "Final_Percentage_Fusion"] = conc[2] 
+df[df$Sample == "%Fusion Dil 3", "Final_Percentage_Fusion"] = conc[3] 
+df[df$Sample == "%Fusion Dil 4", "Final_Percentage_Fusion"] = conc[4]
+df[df$Sample == "%Fusion Dil 5", "Final_Percentage_Fusion"] = conc[5] 
+df[df$Sample == "%Fusion Dil 6", "Final_Percentage_Fusion"] = conc[6]
+df[df$Sample == "%Fusion Dil 7", "Final_Percentage_Fusion"] = conc[7] 
+df[df$Sample == "%Fusion Dil 8", "Final_Percentage_Fusion"] = conc[8] 
+df[df$Sample == "%Fusion Dil 9", "Final_Percentage_Fusion"] = conc[9] 
+df[df$Sample == "%Fusion Dil 10", "Final_Percentage_Fusion"] = conc[10] 
+
+
+
+fraction_called_function <- function (df, column_name) { 
+	
+	if (nrow(df) == 0  ) {
+		
+		return (c(0))
+	}
+	denom = nrow(df)
+	num = sum(df[column_name])
+
+	return (c(num/denom))
+}
+
+
+df_TexasRed <- df[df$Fluor == "Texas Red", c("UniqueID", "Fluor", "Target", "Sample", "Cq", "Final_Percentage_Fusion")]
+df_FAM <- df[df$Fluor == "FAM", c("UniqueID", "Fluor", "Target", "Sample", "Cq")]
+
+channels <- merge (df_TexasRed ,df_FAM, by="UniqueID")
+channels <- channels[!(is.na (channels$Final_Percentage_Fusion)) & channels$Final_Percentage_Fusion > 0,]  # this removes Positive control
+
+# because 100% fusion dosen't have any WT DNA, the deltaCq is meaningless. Remove
+#channels <- channels[channels$Final_Percentage_Fusion != 100,]
+
+
+channels[,"deltaCq"] <- channels["Cq.y"] - channels["Cq.x"]
+channels[,"log2Conc"] <- log2(channels["Final_Percentage_Fusion"])
+
+
+# assign deltaCq to Cq so we cas use the summary function, thisis a hack.
+channels[,"Cq"] <- channels["deltaCq"]
+
+
+# probit analysis
+
+# https://stats.idre.ucla.edu/r/dae/probit-regression/
+
+# all the data, MAKE SURE channels <- channels[!is.na(channels$deltaCq),]  IS NOT USED
+chan <- channels
+
+chan["FusionCalledFFPE"] <- 1
+chan["FusionCallFrozen"] <- 1
+
+cutoffs <- c(15, 5)
+
+chan[is.na(chan$deltaCq), "FusionCalledFFPE"] <- 0
+chan[is.na(chan$deltaCq), "FusionCallFrozen"] <- 0
+
+
+# CHECK if this should be > or >=. I think it's >
+chan[!is.na(chan$deltaCq) & chan$deltaCq > cutoffs[2], "FusionCalledFFPE"] <- 0
+chan[!is.na(chan$deltaCq) &  chan$deltaCq > cutoffs[1], "FusionCallFrozen"] <- 0
+
+
+### FOR FFPE
+#myprobit <- glm(FusionCalledFFPE ~ log2Conc , family = binomial(link = "probit"), 
+#    data = chan)
+#mylogit <- glm (FusionCalledFFPE ~ log2Conc , family = binomial(link = "logit"), 
+#    data = chan)
+#SampleType="FFPE"
+#sampleTypeVar = "FusionCalledFFPE"
+#probit_plot_filename = paste (folder, "FFPE_probit.png", sep="")
+#logit_plot_filename = paste (folder, "FFPE_logit.png", sep="")
+
+# MANUAL
+xlower <- 2
+xupper <- 4
+
+# then copy the code for frozen below, except myprobit
+
+## FOR FROZEN
+myprobit <- glm(FusionCallFrozen ~ log2Conc , family = binomial(link = "probit"), 
+    data = chan)
+mylogit <- glm (FusionCallFrozen ~ log2Conc , family = binomial(link = "logit"), 
+    data = chan)
+SampleType="Frozen"
+sampleTypeVar = "FusionCallFrozen"
+probit_plot_filename = paste (folder, "Frozen_probit.png", sep="")
+logit_plot_filename = paste (folder, "Frozen_logit.png", sep="")
+
+# optional
+# xtabs (~FusionCalledFFPE + log2Conc, data=chan)
+
+#BROAD RANGE TO GRAPH
+xlower <-  min(log2(conc))
+xupper <-  max(log2(conc))
+
+#MANUAL tighten to find values
+#xlower <- -0.2
+#xupper <- 0
+
+##FFPE
+#xlower<-2.04
+#xupper <- 2.06
+
+# Frozen
+xlower <- 2.36
+xupper <- 2.57
+
+# predict to find sensitivity of 95%
+temp.data <- data.frame(log2Conc = seq(from = xlower, to = xupper, length.out = 10))
+
+
+#predict(myprobit, newdata, type = "response", se.fit = TRUE)
+# look at $fit for probabilities. want something with 99%
+# manual, play with newdata
+#predict(myprobit, newdata, type = "response", se.fit = TRUE)
+
+predicted.data.probit <-  predict(myprobit, temp.data, type = "response", se.fit=TRUE)
+predicted.data.logit <-  predict(mylogit, temp.data, type = "response", se.fit=TRUE)
+
+new.data.probit <- cbind(temp.data, predicted.data.probit)
+ new.data.probit["Upper95ConfidenceInterval"] <- new.data.probit["fit"] + 1.96*new.data.probit["se.fit"]
+ new.data.probit["Lower95ConfidenceInterval"] <- new.data.probit["fit"] - 1.96*new.data.probit["se.fit"]
+# ugh, confidence intervals are too big
+
+new.data.probit[new.data.probit$Upper95ConfidenceInterval > 1, "Upper95ConfidenceInterval"] <- 1
+new.data.probit[new.data.probit$Lower95ConfidenceInterval < 0, "Lower95ConfidenceInterval"] <- 0
+
+
+new.data.logit <- cbind(temp.data, predicted.data.logit)
+ new.data.logit["Upper95ConfidenceInterval"] <- new.data.logit["fit"] + 1.96*new.data.logit["se.fit"]
+ new.data.logit["Lower95ConfidenceInterval"] <- new.data.logit["fit"] - 1.96*new.data.logit["se.fit"]
+# ugh, confidence intervals are too big
+
+new.data.logit[new.data.logit$Upper95ConfidenceInterval > 1, "Upper95ConfidenceInterval"] <- 1
+new.data.logit[new.data.logit$Lower95ConfidenceInterval < 0, "Lower95ConfidenceInterval"] <- 0
+
+# http://www.polsci.ucsb.edu/faculty/glasgow/ps206/ps206_binary.r
+
+png(filename=probit_plot_filename)
+
+#summary_Cq_data$Final_Percentage_Fusion
+fraction_called <- ddply (chan, c('log2Conc'), .fun = fraction_called_function , sampleTypeVar)
+
+
+plot(fraction_called$log2Conc, fraction_called$V1, main = paste ("Probit Regression Analysis on ", SampleType, sep=""), xlab="log2 Concentration", ylab="Probability of Calling Fusions", xlim=c(xlower-0.25,xupper+0.25), ylim=c(-0.1,1.1), mgp=c(2,.5,0))
+#curve(pnorm(coef(myprobit)[1] + coef(myprobit)[2]*x), add=TRUE)
+
+# for instructions on how to plot logit https://stats.stackexchange.com/questions/29044/plotting-confidence-intervals-for-the-predicted-probabilities-from-a-logistic-re
+
+
+with (new.data.probit, lines (log2Conc , fit, col="blue"))
+with(new.data.probit, lines (log2Conc, Upper95ConfidenceInterval, lty=2))
+with(new.data.probit, lines (log2Conc, Lower95ConfidenceInterval, lty=2))
+
+dev.off()
+
+# confidence interval
+# https://stats.stackexchange.com/questions/71694/log-probit-model-calculation-of-confidence-intervals-for-ed50-data
+
+
+png(filename=logit_plot_filename)
+plot(fraction_called$log2Conc, fraction_called$V1, main = paste ("Logit Regression Analysis on ", SampleType, sep=""), xlab="log2 Concentration", ylab="Probability of Calling Fusions", xlim=c(xlower-0.25,xupper+0.25), ylim=c(-0.1,1.1), mgp=c(2,.5,0))
+#curve(pnorm(coef(myprobit)[1] + coef(myprobit)[2]*x), add=TRUE)
+
+# for instructions on how to plot logit https://stats.stackexchange.com/questions/29044/plotting-confidence-intervals-for-the-predicted-probabilities-from-a-logistic-re
+with (new.data.logit, lines (log2Conc , fit, col="blue"))
+with(new.data.logit, lines (log2Conc, Upper95ConfidenceInterval, lty=2))
+with(new.data.logit, lines (log2Conc, Lower95ConfidenceInterval, lty=2))
+
+dev.off()

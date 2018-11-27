@@ -1,0 +1,574 @@
+library (tolerance)
+library (plyr)
+library (EnvStats)
+library (ggplot2)
+library (car)
+
+
+## READ IN DATA
+filename = "C:\\Users\\ngpc4\\Documents\\FusionB\\ReportableRange\\ReportableRange_runs_combined.csv"
+folder = "C:\\Users\\ngpc4\\Documents\\FusionB\\ReportableRange\\data\\"
+
+df <- read.csv (filename, header=TRUE)
+
+
+df[,"UniqueID"] = paste (df[,"Run"],df[,"Well"])
+
+unique_id_list = unique (df[,"UniqueID"])
+
+wells_to_remove_df <- read.csv ("C:\\Users\\ngpc4\\Documents\\FusionB\\wells_to_exclude.csv", header=TRUE)
+wells_to_remove_df[,"UniqueID"] = paste (wells_to_remove_df[,"Run"], wells_to_remove_df[,"Well"])
+df <- df[!(df$UniqueID %in% wells_to_remove_df[,"UniqueID"]), ] 
+
+
+
+#negative_control <- df[df$Sample == "NTC",]
+#summary_negative_controls <- ddply (negative_control, c('Fluor'), .fun=summary_function)
+
+# remove PC and NTC
+df <- df[df$Content != 'PC' & df$Content != 'NTC' & df$Sample != 'PC1' & df$Sample != 'PC4' & df$Sample != 'NTC' &df$Content != "Pos Ctrl-1",]   # drop PC and NTC - just looking at effect of the dilution
+10
+df["Fusion_Concentration"] <- vector ( ,length=nrow (df))
+
+conc <- c(100, 50, 25, 12.5, 6.25, 3.125, 1.563, .7810, .3906 , .1953, .0977, 0.0488 )
+
+
+
+
+# assign concentrations, need to check
+df[df$Content == "Unkn-01", "Fusion_Concentration"] = conc[1] 
+df[df$Content == "Unkn-02", "Fusion_Concentration"] = conc[2] 
+df[df$Content == "Unkn-03", "Fusion_Concentration"] = conc[3] 
+df[df$Content == "Unkn-04", "Fusion_Concentration"] = conc[4]
+df[df$Content == "Unkn-05", "Fusion_Concentration"] = conc[5] 
+df[df$Content == "Unkn-06", "Fusion_Concentration"] = conc[6]
+df[df$Content == "Unkn-07", "Fusion_Concentration"] = conc[7] 
+df[df$Content == "Unkn-08", "Fusion_Concentration"] = conc[8] 
+df[df$Content == "Unkn-09", "Fusion_Concentration"] = conc[9] 
+df[df$Content == "Unkn-10", "Fusion_Concentration"] = conc[10] 
+df[df$Content == "Unkn-11", "Fusion_Concentration"] = conc[11]
+df[df$Content == "Unkn-12", "Fusion_Concentration"] = conc[12] 
+
+df$Content <- factor (df$Content)
+
+
+assign_RNA_input_level <- function (df) {
+
+	df["RNA_Input"] <- vector ( ,length=nrow (df))
+	df[grep("High", df$Sample), "RNA_Input"] = "High"
+	df[grep("HIgh", df$Sample), "RNA_Input"] = "High"
+	df[grep("high", df$Sample), "RNA_Input"] = "High"
+	df[grep("Med", df$Sample), "RNA_Input"] = "Medium"
+	df[grep("Low", df$Sample), "RNA_Input"] = "Low"
+	df[grep("low", df$Sample), "RNA_Input"] = "Low"
+
+# what is this, is Input_RNA_Conc still used, not in study plan??
+	df["Input_RNA_Conc"] <- vector ( ,length=nrow (df))
+	df[df$RNA_Input == "High", "Input_RNA_Conc"] = 17.57
+	df[df$RNA_Input == "Medium", "Input_RNA_Conc"] = 1.12
+	df[df$RNA_Input == "Low", "Input_RNA_Conc"] = 0.07
+
+	df["Target_PTPRK_Ct"] <- vector ( ,length=nrow (df))	
+	df[df$RNA_Input == "High", "Target_PTPRK_Ct"] = 22
+	df[df$RNA_Input == "Medium", "Target_PTPRK_Ct"] = 26
+	df[df$RNA_Input == "Low", "Target_PTPRK_Ct"] = 30
+
+	return (df)
+}
+
+
+summary_function <- function (df) {
+	num_NAs <- sum (is.na (df$Cq))
+	cleaned_df <- df[!is.na(df$Cq),]
+       count <- nrow (cleaned_df)
+       mean <- mean (cleaned_df$Cq)
+	median <- median (cleaned_df$Cq)
+	sd <- sd (cleaned_df$Cq)
+	#cv <- sd/mean
+               
+	#percentiles <- quantile(cleaned_df$Cq, probs = c(0.01, 0.05, 0.1, 0.90, .95, .99))
+	min <- min (cleaned_df$Cq)
+	max <- max (cleaned_df$Cq)
+
+	results <- data.frame (matrix (ncol=7,nrow=1))
+	colnames (results) <- c("Number of observations", "Number of missing observations", "Mean", "Median", "Standard Deviation", "Min", "Max")
+	
+
+	results[1,] <- c(count, num_NAs, mean, median, sd, min, max)
+	return (round (results,2)) 
+}
+
+frequency_counts <- function (df, cutoff) {
+	num_NAs <- sum (is.na (df$deltaCq))
+	count_above <- 0
+	count_below <- 0
+	cleaned_df <- df[!is.na (df$deltaCq),]
+	if (nrow (cleaned_df) > 0) {
+		count_above <- nrow(cleaned_df[cleaned_df$deltaCq > cutoff,])
+		count_below <- nrow(cleaned_df[cleaned_df$deltaCq <= cutoff,])
+	} 
+	
+	results <- data.frame (matrix (ncol=3, nrow=1))
+	colnames (results) <- c ("Number of missing observations", "Number > cutoff", "Number <= cutoff")
+	results[1,] <- c(num_NAs, count_above, count_below)
+
+	return (results)
+}
+
+
+
+
+
+df <- assign_RNA_input_level (df)
+# remove rows where RNA input level not assigned
+df <- df[df$RNA_Input != 'FALSE' ,]   # drop PC and NC, just looking at effect of RNA levels
+
+
+#df_replace_NaN <- df
+#df_replace_NaN[is.na (df_replace_NaN$Cq),"Cq"] = 43
+
+# doesn't make sense to replace NaN with 43 for logistic / linear regression
+#df <- df[!is.na(df$Cq),] # commented out because need number of missing observations
+
+summary_all_data <- ddply (df, c('Fluor', 'Fusion_Concentration', 'RNA_Input'), .fun=summary_function)
+stats_filename = paste (folder, "summary_statistics.csv", sep="")
+write.csv (summary_all_data, file=stats_filename, row.names=TRUE)
+
+#########
+
+
+df[,"UniqueID"] = paste (df[,"Run"],df[,"Well"])
+
+#unique_id_list = unique (df[,"UniqueID"])
+
+df_TexasRed <- df[df$Fluor == "Texas Red", c("UniqueID", "Fluor", "Target", "Sample", "Cq", "Fusion_Concentration", "RNA_Input", "Input_RNA_Conc", "Target_PTPRK_Ct")]
+df_FAM <- df[df$Fluor == "FAM", c("UniqueID", "Fluor", "Target", "Sample", "Cq")]
+
+channels <- merge (df_TexasRed ,df_FAM, by="UniqueID")
+channels[,"deltaCq"] <- channels["Cq.y"] - channels["Cq.x"]
+channels[,"Cq"] <- channels[,"deltaCq"]  # so we can use the summary_function
+
+names(channels)[names(channels) == "Cq.x"] <- "TexasRed.Cq"
+names(channels)[names(channels) == "Cq.y"] <- "FAM.Cq"
+
+
+summary_for_DeltaCq <- ddply (channels, c('Fusion_Concentration', 'RNA_Input'), .fun=summary_function)
+stats_filename = paste (folder, "summary_statistics_deltaCq.csv", sep="")
+write.csv (summary_for_DeltaCq, file=stats_filename, row.names=TRUE)
+
+# counts
+#### YOU WILL NEED TO SET CUTOFF
+summary_frequency_counts <- ddply (channels, c('Fusion_Concentration', 'RNA_Input'), 
+				.fun=frequency_counts, cutoff=15)
+freq_counts_filename = paste (folder, "freq_counts_for_cutoff_15.csv", sep="")
+write.csv (summary_frequency_counts, file= freq_counts_filename, row.names=TRUE)
+
+
+summary_frequency_counts <- ddply (channels, c('Fusion_Concentration', 'RNA_Input'), 
+				.fun=frequency_counts, cutoff=5)
+freq_counts_filename = paste (folder, "freq_counts_for_cutoff_5.csv", sep="")
+write.csv (summary_frequency_counts, file= freq_counts_filename, row.names=TRUE)
+
+
+
+channels <- channels[!is.na(channels$deltaCq),]  # remove those that aren't called, don't assign 43
+
+#source ("C:\\Users\\ngpc4\\Documents\\Biostatistics\\R_functions.R.txt")
+
+### x-axis Texas Red
+
+colors37 = c("#466791","#60bf37","#953ada","#4fbe6c","#ce49d3","#a7b43d","#5a51dc","#d49f36","#552095",
+	"#507f2d","#db37aa","#84b67c","#a06fda","#df462a","#5b83db","#c76c2d","#4f49a3","#82702d",
+	"#dd6bbb","#334c22","#d83979","#55baad","#dc4555","#62aad3","#8c3025","#417d61","#862977",
+	"#bba672","#403367","#da8a6d","#a79cd4","#71482c","#c689d0","#6b2940","#d593a7","#895c8b",
+	"#bd5975")
+
+colors12 = c ("#FFDC00", "#01FF70", "#001f3f", "#FF851B", "#B10DC9", "#0074D9", "#FF4136", "#7FDBFF", "#85144b", "#39CCCC",
+"#F012BE", "#2ECC40")
+
+params_to_plot = c("deltaCq", "FAM.Cq", "Target_PTPRK_Ct")
+
+for (param in params_to_plot) {
+ 
+	plot_filename = paste (folder,"TexasRed_vs_", param, ".png", sep="")
+	png(filename=plot_filename)
+
+	myplot <- ggplot ()
+
+	for (index in seq(1, length (conc), by=1)) {
+		print (index)
+		fusion_conc = conc[index]
+	 	myplot <- myplot + 
+			geom_point(data=channels[channels$Fusion_Concentration == fusion_conc,], 
+			aes(x= TexasRed.Cq, y=eval(parse(text=param))), 
+			color=colors12[index], pch=index, size = 2) + 
+	  	geom_smooth(method="lm", data=channels[channels$Fusion_Concentration == fusion_conc,], 
+			aes(x= TexasRed.Cq, y=eval(parse(text=param))), color=colors12[index]) 
+	}
+	
+	if (param == "deltaCq") {
+		ylabel = expression(paste(Delta, "Ct"))
+	} else if (param == "FAM.Cq" ) {
+		ylabel = "FAM Ct"
+	} else if (param == "Target_PTPRK_Ct") {
+		ylabel = "Input Total RNA Target Ct (PTPRK Ct)"
+	}
+
+	myplot <- myplot + ylab(ylabel) + xlab("Texas Red Ct")
+
+	print (myplot)
+	dev.off()
+}
+
+#the legend
+plot_filename = paste (folder,"TexasRed_legend.png", sep="")
+png(filename=plot_filename)
+plot (0,0, type = "n", ann = F, axes = F)
+legend(0,1, title="% Fusion Concentration", legend = conc, pt.bg=colors12[1:length(conc)], col=colors12[1:length (conc)], pch=1:length(conc)) 
+dev.off()
+
+####################################
+#x-axis log2(Fusion)
+
+params_to_plot = c("deltaCq", "FAM.Cq", "TexasRed.Cq")
+xlabel = expression (paste (log[2], "(% Fusion)", sep=""))
+
+for (param in params_to_plot) {
+ 
+	if (param == "deltaCq") {
+		ylabel = expression(paste(Delta, "Ct"))
+	} else if (param == "FAM.Cq" ) {
+		ylabel = "FAM Ct"
+	} else if (param == "TexasRed.Cq") {
+		ylabel = "Texas Red Ct"
+	}
+
+	plot_filename = paste (folder,"Fusion_Concentration_vs_", param, ".png", sep="")
+	png(filename=plot_filename)
+
+	myplot <- ggplot () +
+  	geom_point(data=channels[channels$RNA_Input == "High",], aes(x= log2 (Fusion_Concentration), y=eval(parse(text=param))), color='aquamarine2', size = 2) + 
+	  geom_smooth(data=channels[channels$RNA_Input == "High",], aes(x= log2 (Fusion_Concentration),  y=eval(parse(text=param))), color='aquamarine2') +
+
+	  geom_point(data=channels[channels$RNA_Input == "Medium",], aes(x= log2 (Fusion_Concentration), y=eval(parse(text=param))), color='brown1', size = 2) + 
+  	geom_smooth(data = channels[channels$RNA_Input == "Medium",], aes(x= log2 (Fusion_Concentration), y=eval(parse(text=param))), method=lm, color='brown1') +
+
+	 geom_point(data=channels[channels$RNA_Input == "Low",], aes(x= log2 (Fusion_Concentration), y=eval(parse(text=param))), color='purple', size = 2) + 
+  	geom_smooth(data = channels[channels$RNA_Input == "Low",], aes(x= log2 (Fusion_Concentration), y=eval(parse(text=param))), method=lm, color='purple') +
+   	 ylab (ylabel) + xlab ( xlabel )
+
+	
+	print (myplot)
+	dev.off()
+}
+
+plot_filename = paste (folder,"Fusion_legend.png", sep="")
+png(filename=plot_filename)
+plot (0,0, type = "n", ann = F, axes = F)
+legend(0,1, title="RNA Input Level", legend = c("High", "Medium", "Low"), 
+	col=c("aquamarine2", "brown1", "purple"), pch=16)
+dev.off() 
+
+for (param in params_to_plot) {
+
+high.lm <- lm (eval(parse(text=param)) ~ log2(Fusion_Concentration), data=channels[channels$RNA_Input == "High",])
+medium.lm <- lm (eval(parse(text=param)) ~ log2(Fusion_Concentration), data=channels[channels$RNA_Input == "Medium",])
+low.lm <- lm (eval(parse(text=param)) ~ log2(Fusion_Concentration), data=channels[channels$RNA_Input == "Low",])
+all.lm <- lm (eval(parse(text=param)) ~ log2(Fusion_Concentration), data=channels)
+
+parameter_estimates_filename = paste (folder, "parameter_estimates_for_RNA_Input_", param, ".txt", sep="")
+sink (parameter_estimates_filename)
+print ("RNA Input HIGH")
+print (summary (high.lm))
+print (confint(high.lm, "log2(Fusion_Concentration)", level=0.95))
+
+print ("RNA Input MEDIUM")
+print (summary (medium.lm))
+print (confint(medium.lm, "log2(Fusion_Concentration)", level=0.95))
+
+print ("RNA Input LOW")
+print (summary (low.lm))
+print (confint(low.lm, "log2(Fusion_Concentration)", level=0.95))
+
+sink()
+
+ }  # end params
+
+##################################
+## For each % fusion. this prints out 12 linear regressions
+
+params = c("deltaCq", "FAM.Cq",  "Target_PTPRK_Ct")
+for  (param in params) {
+
+parameter_estimates_filename = paste (folder, "parameter_estimates_for_percentage_fusion", param, ".txt", sep="")
+sink (parameter_estimates_filename)
+
+#pdf (paste (folder,"plot_for_percentage_fusion_TexasRed_deltaCq.pdf",sep=""))
+#par (mfrow = c(3,3))
+
+
+for (fus_conc in conc) {
+	
+	subset_df = channels[channels$Fusion_Concentration == fus_conc,]
+	print (param)
+	if (nrow (subset_df) > 0) {
+	subset_df.lm <- lm ( eval (parse( text=param)) ~ TexasRed.Cq, data=subset_df)
+	confidence_interval <- predict (subset_df.lm,  interval='confidence', level=0.95)
+	print (c("% fusion", fus_conc) )
+	
+	print (coef (subset_df.lm))
+	print (confint(subset_df.lm, 'TexasRed.Cq', level=0.95))
+
+#	print (summary (subset_df.lm))
+
+#	attach (subset_df)
+#	x <- TexasRed.Cq
+#	y <- param
+
+	
+#	plot (TexasRed.Cq, deltaCq,  xlim=c(min(x), max(x)), ylim=c(min(y)-1, max(y)+1), main=paste(fus_conc, "% Fusion", sep=""))
+
+#	abline(subset_df.lm, lwd=2)
+#	lines (TexasRed.Cq, confidence_interval[,"lwr"], col="green")
+#	lines (TexasRed.Cq, confidence_interval[,"upr"], col="red")
+
+	#dev.off()
+
+#upper_CI.lm <- lm(confidence_interval[,"upr"] ~ log2(conc))
+
+#detach()
+
+	} # end make sure not empty data frame
+}
+#dev.off()
+sink()
+} # end for all params
+
+
+### linear regression analysis will also be conducted for FAM vs fusion_concentration
+## AMPLIFICATION EFFICIENCY
+
+calc_amplification_efficiency <- function (lm) {
+	slope <- lm$coefficients[2]
+	amplification_efficiency <- (10 ^ (-1 / slope)) -1
+	return (amplification_efficiency)
+}
+
+
+
+parameter_estimates_filename = paste (folder, "parameter_estimates_for_amplification_efficiency_FAM.txt", sep="")
+sink (parameter_estimates_filename)
+	print (fluor)
+	print ("")
+	high.lm <- lm (FAM.Cq ~ log10(Fusion_Concentration), data=channels[channels$RNA_Input == "High",])
+	medium.lm <- lm (FAM.Cq ~ log10(Fusion_Concentration), data=channels[channels$RNA_Input == "Medium",])
+	low.lm <- lm (FAM.Cq ~ log10(Fusion_Concentration), data=channels[channels$RNA_Input == "Low",])
+	all.lm <- lm (FAM.Cq ~ log10(Fusion_Concentration), data=channels)
+
+
+print ("RNA Input HIGH")
+print ("Amplification Efficency")
+print (calc_amplification_efficiency (high.lm))
+subdf <- channels[channels$RNA_Input == "High",]
+print (cor (subdf["FAM.Cq"] , log10( subdf["Fusion_Concentration"])))
+print (summary (high.lm))
+
+
+
+print ("RNA Input MEDIUM")
+print ("Amplification Efficency")
+print (calc_amplification_efficiency (medium.lm))
+subdf <- channels[channels$RNA_Input == "Medium",]
+print (cor (subdf["FAM.Cq"] , log10( subdf["Fusion_Concentration"])))
+print (summary (medium.lm))
+
+
+print ("RNA Input LOW")
+print ("Amplification Efficency")
+print (calc_amplification_efficiency (low.lm))
+subdf <- channels[channels$RNA_Input == "Low",]
+print (cor (subdf["FAM.Cq"] , log10( subdf["Fusion_Concentration"])))
+print (summary (low.lm))
+
+
+print ("RNA Input ALL")
+print ("Amplification Efficency")
+print (calc_amplification_efficiency (all.lm))
+subdf <- channels
+print (cor (subdf["FAM.Cq"] , log10( subdf["Fusion_Concentration"])))
+print (summary (all.lm))
+
+
+
+
+sink()
+
+
+
+## For each % fusion, calculate amplification efficiency of WT (Texas Red)
+
+
+parameter_estimates_filename = paste (folder, "parameter_estimates_for_amplification_efficiency_TexasRed.txt", sep="")
+sink (parameter_estimates_filename)
+
+
+for (fus_conc in conc) {
+	
+	subset_df = channels[channels$Fusion_Concentration == fus_conc & channels$Input_RNA_Conc > 0,]
+
+	if (nrow (subset_df) > 0) {
+		fus_lm <- lm (TexasRed.Cq ~ log10(Input_RNA_Conc), data=subset_df)
+
+		print (fus_conc)
+		print ("Amplification Efficency")
+		print (calc_amplification_efficiency (fus_lm))
+
+	} # end make sure not empty data frame
+}
+
+sink()
+
+# MULTIPLE LINEAR REGRESSION
+# Cq.x is Texas Red Cq
+
+cor (log2(Fusion_Concentration),TexasRed.Cq)
+# 0.2990771
+
+### correlation is < .80, can use both as predictors 
+
+
+
+
+
+mult.lin.regression <- lm (formula = deltaCq ~ TexasRed.Cq + log2(Fusion_Concentration) , data=channels)
+
+parameter_estimates_filename = paste (folder, "multiple_linear_regression_parameter_estimates.txt", sep="")
+sink (parameter_estimates_filename)
+summary (mult.lin.regression)
+print ("Confidence intervals")
+confint(mult.lin.regression, level=0.95)
+print ("Interaction")
+print ("VIF")
+print (vif (mult.lin.regression))
+#               TexasRed.Cq log2(Fusion_Concentration) 
+#                  1.098234                   1.098234 
+# Zuur, A. F., Ieno, E. N., Walker, N., Saveliev, A. A. & Smith, G. M. 2009. Mixed effects models and extensions in ecology with R, 1st edition. Springer, New York.
+# Looks like a general rule of thumb is that if VIF is > 5, then multicollinearity is high between predictors.
+# This shows hat multicollinearity is low, and 
+print ("Correlation")
+print (cor (log2(Fusion_Concentration),TexasRed.Cq))
+sink()
+
+plot_filename = paste (folder, "multiple_linear_regression_residuals.png")
+png (filename=plot_filename)
+plot (density (residuals (mult.lin.regression)))
+dev.off()
+
+
+
+plot_filename = paste (folder, "TexasRed_vs_deltaCq.png")
+png (filename=plot_filename)
+attach (channels)
+#plot (log2(Fusion_Concentration),TexasRed.Cq, col=Fusion_Concentration)
+plot (TexasRed.Cq, deltaCq, col=Fusion_Concentration, ylab="Texas Red Ct")
+dev.off()
+detach()
+
+
+
+plot_filename = paste (folder, "multiple_linear_regression_diagnostics.png")
+png (filename=plot_filename)
+layout(matrix(c(1,2,3,4),2,2)) # optional 4 graphs/page 
+plot(mult.lin.regression)
+dev.off()
+
+
+
+#### log RNA on x-axis, y axis Texas Red
+
+
+param =  "Target_PTPRK_Ct"
+
+
+parameter_estimates_filename = paste (folder, "parameter_estimates_for_percentage_fusion", param, ".txt", sep="")
+sink (parameter_estimates_filename)
+
+
+for (fus_conc in conc) {
+	
+	subset_df = channels[channels$Fusion_Concentration == fus_conc,]
+	print (param)
+	if (nrow (subset_df) > 0) {
+	subset_df.lm <- lm (TexasRed.Cq ~ Target_PTPRK_Ct, data=subset_df)
+	confidence_interval <- predict (subset_df.lm,  interval='confidence', level=0.95)
+
+	print (c("% fusion", fus_conc) )
+	
+	print (coef (subset_df.lm))
+	print (confint(subset_df.lm, "Target_PTPRK_Ct", level=0.95))
+
+	} # end make sure not empty data frame
+}
+
+sink()
+
+ 
+	plot_filename = paste (folder,param, "_vs_TexasRed.png", sep="")
+print (plot_filename)
+	png(filename=plot_filename)
+
+	myplot <- ggplot ()
+
+	for (index in seq(1, length (conc), by=1)) {
+		print (index)
+		fusion_conc = conc[index]
+	 	myplot <- myplot + 
+			geom_point(data=channels[channels$Fusion_Concentration == fusion_conc,], 
+			aes(y= TexasRed.Cq, x=eval(parse(text=param))), 
+			color=colors12[index], pch=index, size = 2) + 
+	  	geom_smooth(method="lm", data=channels[channels$Fusion_Concentration == fusion_conc,], 
+			aes(y= TexasRed.Cq, x=eval(parse(text=param))), color=colors12[index]) 
+	}
+	
+
+	myplot <- myplot + ylab(ylabel) + ylab("Texas Red Ct") + xlab ("Input Total RNA Target Ct (PTPRK Ct)")
+
+	print (myplot)
+	dev.off()
+
+
+####
+# trying to justify 6.25%
+fus_conc = 6.25
+
+# texas red x-axis, delta Ct y-axis
+subset_df = channels[channels$Fusion_Concentration == fus_conc,]
+
+subset_df.lm <- lm ( deltaCq ~ TexasRed.Cq, data=subset_df)
+
+new.dat <- data.frame ('TexasRed.Cq'=c(22,26,30))
+PI <- predict (subset_df.lm, newdata = new.dat, interval='prediction', level=0.90)
+PI[,"upr"]
+#plot(log2 (chan$Final_Percentage_Fusion),
+# chan$deltaCq, xlim=c(min(x), max(x)), ylim=c(min(y)-1, max(y)+1),
+# xlab="Log2 (Final Percentage Fusion)", ylab=expression(paste(Delta, "Ct"))
+#  )
+
+#abline(chan.lm, lwd=2)
+#lines (log2(conc), PI[,"lwr"], col="green")
+#lines (log2(conc), PI[,"upr"], col="red")
+
+# the fusion dilution where the top prediction limit crosses the cut-off will be estimated and chosen to be the models’ estimate of the C95
+# lm y ~ x . given cuttoff (x), get concentration
+#upper.lm <- lm (PI[,"upr"] ~ log2(conc)  )
+#slope <- upper.lm$coefficients[2]
+#intercept <- upper.lm$coefficients[1]
+
+
+
+# from accuracy, LoB = 12.1396
+#cutoffs <- c(13,5)
+
+# y = mx + b
+
+

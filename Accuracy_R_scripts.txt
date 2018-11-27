@@ -1,0 +1,292 @@
+library (tolerance)
+library (plyr)
+library (EnvStats)
+library (ggplot2)
+source ("C:\\Users\\ngpc4\\Documents\\Biostatistics\\R_functions.R.txt")
+
+folder = "C:\\Users\\ngpc4\\Documents\\FusionB\\Accuracy\\data\\"
+
+filename = "C:\\Users\\ngpc4\\Documents\\FusionB\\Accuracy\\accuracy_combined.csv"
+
+df <- read.csv (filename, header=TRUE)
+
+df[,"UniqueID"] = paste (df[,"Run"],df[,"Well"])
+
+# remove problematic wells
+df_problem <- read.csv ("C:\\Users\\ngpc4\\Documents\\FusionB\\wells_to_exclude.csv", header=TRUE)
+problem_samples <- paste (df_problem[,"Run"], df_problem[,"Well"])
+df <- df[!(df$UniqueID %in% problem_samples), ]
+
+
+# add FFPE/frozen and RNA concentration
+
+filename_details = paste ("C:\\Users\\ngpc4\\Documents\\FusionB\\Accuracy\\SampleDetails.csv", sep="")
+df_details <- read.csv (filename_details, header=TRUE)
+df <- merge (df_details, df, by="Sample", all.y=T)
+
+
+#remove positive samples, only WT should remain
+#positive_samples = readLines (paste(folder, "positive_samples.txt", sep=""))
+#WT_samples  = df[!(df$Sample %in% positive_samples),]
+#pos_samples = df[df$Sample %in% positive_samples,]
+
+# Per discussions with Suman & Cheuk Ka
+# Those with FusionA have Ct values for FAM Fusion A
+# Samples without FusionA have blank Ct values. Filled this in with value "43" for FAM channel only
+# per 3rd paragraph in sect 9.0 of Accuracy Study Plan
+
+
+
+df[df$Fluor == "FAM" & is.na(df$Cq),"Cq"] = 43
+
+df[df$Fluor == "Texas Red" & is.na(df$Cq),"Cq"] = 43
+
+
+#noFusionA_samples =  df[df$Cq == 43 & df$Target == "Fusion A",'Sample']
+#levels(droplevels(noFusionA_samples))
+#noFusionA = df[df$Sample %in% noFusionA_samples,]
+
+#FusionA_samples = df[df$Cq != 43 & df$Target == "Fusion A",'Sample']
+#levels(droplevels(FusionA_samples))
+#FusionA = df[df$Sample %in% FusionA_samples,]
+
+# Label the controls
+#df[!(df$Sample %in% positive_samples), "SampleType"] = "Wild-type"
+#df[df$Sample %in% positive_samples,"SampleType"] = "Contains Fusion A"
+
+df$Sample <- as.character (df$Sample)
+df$SampleType <- as.character (df$SampleType) # this avoids invalid factor level error
+
+df[df$Sample %in% c("PC", "PC1", "PC2", "PC4"),"SampleType"] = "Positive Control"
+df[df$Sample == "NTC", "SampleType"] = "Negative Control"
+
+df$SampleType <- as.factor (df$SampleType)
+df$SampleKind <- as.factor (df$SampleKind)
+
+
+#df[,"UniqueID"] = paste (df[,"Run"],df[,"Well"])
+#unique_id_list = unique (df[,"UniqueID"])
+df_TexasRed <- df[df$Fluor == "Texas Red", c("UniqueID", "Fluor", "Target", "Sample", "Cq", "SampleType", "SampleKind")]
+df_FAM <- df[df$Fluor == "FAM", c("UniqueID", "Fluor", "Target", "Sample", "Cq")]
+
+
+channels <- merge (df_TexasRed ,df_FAM, by="UniqueID")
+
+
+
+
+
+# Section 9.0
+# PTPRK WT Ct = Texas Red
+# Fusion A = FAM
+#df_var <- WT_samples
+#df_var <- pos_samples
+#plot (df_var[df_var$Fluor == "Texas Red", "Cq" ], df_var[df_var$Fluor == "FAM", "Cq"], xlab="PTPRK WT Cq", ylab="Fusion Cq")
+
+#plot (channels[, "Cq.x"], channels[, "Cq.y"], xlab="PTPRK WT Cq", ylab="Fusion A Cq")
+
+#plot (channels[channels$Sample.x %in% positive_samples, "Cq.x"], channels[channels$Sample.x %in% positive_samples, "Cq.y"], xlab="PTPRK WT Cq", ylab="Fusion A Cq")
+
+plot_filename = paste (folder, "Cq_TexasRed_vs_FAM.png", sep="")
+png (filename=plot_filename)
+attach (channels)
+plot (Cq.x, Cq.y, col=c("red", "blue", "green", "black")[SampleType], xlab="PTPRK Wt Ct", ylab="Fusion Ct")
+detach (channels)
+legend(x="topright", legend = levels(channels$SampleType), col=c("red","blue", "green", "black"), pch=1)
+dev.off()
+
+
+
+# Boxplot 9.0
+fluors <- levels (df$Fluor)
+sample_types <- levels (df$SampleKind)
+
+for (sampletype in sample_types) {
+for (fluor in fluors) {
+	title = paste (sampletype, ":", fluor)
+	print (title)
+	plot_filename = paste (folder, sampletype, "_", fluor, ".png", sep="")
+	print (plot_filename)
+	#png(filename=plot_filename)
+	df_tmp <- df[df$Fluor == fluor & df$SampleKind == sampletype,]
+	df_tmp <- df_tmp[!is.na(df_tmp$SampleType),]
+	#p1 <- ggplot (df_tmp , aes(x=SampleType,y=Cq)) + geom_boxplot() + ggtitle (title) + ylab("Ct") + xlab("")
+	# p1 <- ggplot (df_tmp , aes(x=SampleType,y=Cq)) + geom_violin () + ggtitle (title) + ylab("Ct") + xlab("")
+	p1 <- ggplot (df_tmp , aes(x=SampleType,y=Cq)) + geom_dotplot (binaxis='y', stackdir='centerwhole', dotsize=0.5, ) + ggtitle (title) + ylab("Ct") + xlab("")
+	ggsave (plot_filename, plot=p1)
+	#dev.off()
+}
+}
+
+binwidth=.7, stackratio=0.7
+
+
+#FusionA
+
+## 9.1
+#  ?
+# Use percentils and tolerance intervals for shock-frozen and FFPE for Texas Red. Test for normality
+# only want samples with Fusion A results? not very many...
+# what do bullet points mean
+
+plot_filename = paste (folder, "RNA_concentration_vs_PTPRK_WT_for_WT_samples.png", sep="")
+png (plot_filename)
+WT_samples <- df[df$SampleType %in% c("Wild-type", "Fusion B-Negative")  & df$Fluor == "Texas Red",]
+attach (WT_samples)
+plot (Cq, Concentration, col=c("red", "blue")[SampleKind], xlab=fluor, ylab="RNA Concentration")
+detach (WT_samples)
+legend(x="topleft", legend = levels(WT_samples$SampleKind), col=c("red","blue"), pch=1)
+dev.off()
+
+# 9.1 confidence intervals
+confidence_levels <- c(0.99, 0.95, 0.90)
+coverage_levels <- c(0.900, 0.950, 0.990)
+
+source("http://goo.gl/UUyEzD")
+WT_frozen <- WT_samples[WT_samples$SampleKind=="shock frozen",]
+WT_FFPE <- WT_samples[WT_samples$SampleKind=="FFPE",]
+
+png (paste (folder, "WT_frozen_outliers.png", sep=""))
+outlierKD (WT_frozen, Cq)
+dev.off()
+
+png (paste (folder, "WT_FFPE_outliers.png", sep=""))
+outlierKD (WT_FFPE, Cq)
+dev.off()
+
+shapiro.test (WT_frozen$Cq)
+shapiro.test (WT_FFPE$Cq)
+
+current_nonparametric <- data.frame (matrix (ncol=5, nrow=0))
+y <- c ("Sample Type", "alpha", "P",  "2-sided.lower", "2-sided.upper")
+
+for (confidence_level in confidence_levels) {
+alpha_num = 1 - confidence_level
+for (coverage_level in coverage_levels) {
+	
+	nonparametric <- ddply (WT_samples, c('SampleKind'), .fun = nptol_function, alpha=alpha_num, coverage_level=coverage_level ) 
+	current_nonparametric <- merge (current_nonparametric, nonparametric, all=TRUE)
+
+}   # end  coverage_level
+}   # end confidence_level
+
+write.csv (current_nonparametric, file = paste (folder, "ConfidenceInterval_for_WT_TexasRed.csv", sep=""))
+
+####
+summary_statistics <- ddply (df, c('Fluor', 'SampleType', 'SampleKind'),.fun=summary_function)
+write.csv(summary_statistics, file = paste (folder, "Summary_Statistics.csv",sep=""))
+
+#####
+
+
+# Calculate deltaCq
+df[,"UniqueID"] = paste (df[,"Run"],df[,"Well"])
+
+unique_id_list = unique (df[,"UniqueID"])
+
+df_TexasRed <- df[df$Fluor == "Texas Red", c("UniqueID", "Fluor", "Target", "Sample", "Cq", "SampleKind", "SampleType")]
+df_FAM <- df[df$Fluor == "FAM", c("UniqueID", "Fluor", "Target", "Sample", "Cq")]
+
+channels <- merge (df_TexasRed ,df_FAM, by="UniqueID")
+channels[,"deltaCq"] <- channels["Cq.y"] - channels["Cq.x"]
+channels[,"KindAndType"] = paste (channels[,"SampleKind"], channels[,"SampleType"])
+
+
+summary_statistics_deltaCq <- ddply (channels, c('SampleType', 'SampleKind'), .fun=summary_function_deltaCq)
+write.csv (summary_statistics_deltaCq, file= paste (folder, "Summary_Statistics_Delta_Cq_details.csv", sep=""))
+
+summary_statistics_deltaCq <- ddply (channels, c('SampleType'), .fun=summary_function_deltaCq)
+write.csv (summary_statistics_deltaCq, file= paste (folder, "Summary_Statistics_Delta_Cq.csv", sep=""))
+LoB <-  summary_statistics_deltaCq[summary_statistics_deltaCq$SampleType == "Wild-type","5th percentile"]
+
+
+## THIS HAS TO BE DONE MANUALLY TO LOOK GOOD
+
+plot_filename = paste (folder, "FFPE_and_shock_frozen.png", sep="")
+channels_sub <- channels[!is.na(channels$SampleKind),]   
+plot_chart <- ggplot (channels_sub , aes(x=KindAndType,y=deltaCq)) + geom_boxplot() + xlab("") + ylab(expression(paste(Delta, "Ct")))
+plot_chart
+
+### MANUALLY EXPAND WINDOW SO THAT X-AXIS CAN BE SEEN
+ggsave (plot_filename, plot=plot_chart)
+dev.off()
+
+# add lines for LOB
+
+
+subset_df <- channels[channels$SampleKind == "FFPE",]
+plot_filename = paste (folder, "FFPE_with_thresholds.png", sep="")
+
+plot_chart <- ggplot (subset_df , aes(x=KindAndType,y=deltaCq)) + geom_boxplot() + geom_hline(yintercept = 5) + 
+    annotate("text", min(subset_df$KindAndType), 5, vjust = -1, label = "FFPE Cutoff") + xlab("") +
+    ylab(expression(paste(Delta, "Ct")))
+
+### MANUALLY EXPAND WINDOW SO THAT X-AXIS CAN BE SEEN
+ggsave (plot_filename, plot=plot_chart)
+dev.off()
+
+
+subset_df <- channels[channels$SampleKind == "shock frozen",]
+plot_filename = paste (folder, "shock_frozen_with_thresholds.png", sep="")
+
+plot_chart <- ggplot (subset_df , aes(x=KindAndType,y=deltaCq)) + geom_boxplot() + 
+    annotate("text", min(subset_df$KindAndType), 13, vjust = -1, label = "Shock frozen cutoff") + geom_hline(yintercept = 15) +
+     ylab(expression(paste(Delta, "Ct"))) + xlab("")     
+
+### MANUALLY EXPAND WINDOW SO THAT X-AXIS CAN BE SEEN
+ggsave (plot_filename, plot=plot_chart)
+dev.off()
+
+
+#LoB
+# 12.1396
+
+plot_filename = paste (folder, "Cq_boxplot.png", sep ="")
+#plot_chart <- ggplot (channels , aes(x=SampleType,y=deltaCq)) + geom_boxplot() + geom_hline(yintercept= LoB)
+plot_chart <- ggplot (channels , aes(x=SampleType,y=deltaCq)) + geom_boxplot() + xlab("") + ylab(expression(paste(Delta, "Ct")))
+ggsave (plot_filename, plot=plot_chart)
+
+#########################################################################
+#### END ###########################################################
+# Section 9.2
+# Texas Red is a control to make sure there's enough RNA in the sample to run. So just find tolerance intervals
+# when there is enough data
+
+summary_statistics <- ddply (noFusionA, c('Fluor'),.fun=summary_function)
+# PTPRK WT = Texas Red
+
+## section 9.0 / 9.3 (need sequencing / true answers)
+fluors = c("Texas Red", "FAM", "Cy5", "HEX")
+for (fluor in fluors) {
+	filename = paste (c("C:\\Users\\ngpc4\\Documents\\Biostatistics\\Nov22\\", fluor, "_histogram.png"), collapse="")
+	png(filename=filename)
+	title = paste (c(fluor, " values for samples with and without Fusion A"), collapse="")
+	color1 = rgb(0,0,1,0.25)
+	color2 = rgb (1,0,0,0.25)
+	hist(FusionA[FusionA$Fluor == fluor, "Cq" ], col=color1, xlim=c(0,45), ylim=c(0,40), breaks=seq(0,44,2), xlab="Ct values", ylab="Count", main=title)  # first histogram
+	hist(noFusionA[noFusionA$Fluor == fluor, "Cq" ], col=color2, breaks=seq(0,44,2), add=T)
+	legend("topright", c("Fusion B", "no Fusion B"), fill=c(color1, color2))
+	dev.off()
+}
+
+## section 9.4 need sequencing, can be done by hand
+
+
+
+par (new=TRUE)
+plot(hist(noFusionA[noFusionA$Fluor == fluor, "Cq" ]), col=rgb(1,0,0,1/4), xlim=c(0,45), add=TRUE)  # second
+
+FusionA$fusion <- 'yes'
+noFusionA$fusion <- 'no'
+
+combined <- rbind (FusionA, noFusionA)
+
+
+confidence_levels <- c(0.99, 0.95, 0.90)
+coverage_levels <- c(0.900, 0.950, 0.990)
+nonparametric_coverage_levels <- c (0.90, 0.95)
+
+
+
+
+

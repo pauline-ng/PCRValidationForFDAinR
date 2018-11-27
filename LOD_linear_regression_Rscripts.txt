@@ -1,0 +1,262 @@
+library (tolerance)
+library (plyr)
+library (EnvStats)
+library (ggplot2)
+library (car)
+
+
+## READ IN DATA. NARROW_RANGE
+filename = "C:\\Users\\ngpc4\\Documents\\FusionB\\LoD\\LoD_Narrow_Range_Fresh\\narrowRangeFresh_combined.csv"
+folder = "C:\\Users\\ngpc4\\Documents\\FusionB\\LoD\\LoD_Narrow_Range_Fresh\\"
+
+df <- read.csv (filename, header=TRUE)
+
+
+df[,"UniqueID"] = paste (df[,"Run"],df[,"Well"])
+
+unique_id_list = unique (df[,"UniqueID"])
+
+wells_to_remove_df <- read.csv ("C:\\Users\\ngpc4\\Documents\\FusionB\\wells_to_exclude.csv", header=TRUE)
+wells_to_remove_df[,"UniqueID"] = paste (wells_to_remove_df[,"Run"], wells_to_remove_df[,"Well"])
+df <- df[!(df$UniqueID %in% wells_to_remove_df[,"UniqueID"]), ] 
+
+
+
+#negative_control <- df[df$Sample == "NTC",]
+#summary_negative_controls <- ddply (negative_control, c('Fluor'), .fun=summary_function)
+
+# remove PC and NTC
+df <- df[df$Content != 'PC' & df$Content != 'NTC' & df$Sample != 'PC1' & df$Sample != 'PC4' & df$Sample != 'NTC' &df$Content != "Pos Ctrl-1",]   # drop PC and NTC - just looking at effect of the dilution
+10
+df["Fusion_Concentration"] <- vector ( ,length=nrow (df))
+
+#conc <- c(100, 50, 25, 12.5, 6.25, 3.125, 1.563, .7810, .3906 , .1953, .0977, 0.0488 )
+#conc <- c(15.63,11.05,7.81,5.52,3.91,2.76,1.95,1.38, 0.98)
+#conc <- c(4,2.83,2.0,1.41,1,0.71,0.50,0.35, 0.25)
+
+conc <- c(8.80, 6.22, 4.40, 3.11, 2.20, 1.56, 1.10, 0.78, 0.55,0.39)
+
+# assign concentrations, need to check
+df[df$Sample == "%Fusion Dil 1", "Final_Percentage_Fusion"] = conc[1] 
+df[df$Sample == "%Fusion Dil 2", "Final_Percentage_Fusion"] = conc[2] 
+df[df$Sample == "%Fusion Dil 3", "Final_Percentage_Fusion"] = conc[3] 
+df[df$Sample == "%Fusion Dil 4", "Final_Percentage_Fusion"] = conc[4]
+df[df$Sample == "%Fusion Dil 5", "Final_Percentage_Fusion"] = conc[5] 
+df[df$Sample == "%Fusion Dil 6", "Final_Percentage_Fusion"] = conc[6]
+df[df$Sample == "%Fusion Dil 7", "Final_Percentage_Fusion"] = conc[7] 
+df[df$Sample == "%Fusion Dil 8", "Final_Percentage_Fusion"] = conc[8] 
+df[df$Sample == "%Fusion Dil 9", "Final_Percentage_Fusion"] = conc[9] 
+df[df$Sample == "%Fusion Dil 10", "Final_Percentage_Fusion"] = conc[10] 
+
+
+summary_function <- function (df) {
+	num_NAs <- sum (is.na (df$Cq))
+	cleaned_df <- df[!is.na(df$Cq),]
+	#cleaned_df <- df
+	count <- nrow (cleaned_df)
+       mean <- mean (cleaned_df$Cq)
+	median <- median (cleaned_df$Cq)
+	sd <- sd (cleaned_df$Cq)
+	cv <- sd/mean
+               
+	percentiles <- quantile(cleaned_df$Cq, probs = c(0.01, 0.05, 0.1, 0.90, .95, .99))
+	min <- min (cleaned_df$Cq)
+	max <- max (cleaned_df$Cq)
+
+	results <- data.frame (matrix (ncol=7,nrow=1))
+	colnames (results) <- c("Number of observations", "Number of missing observations", "Mean", "Median", "Standard Deviation", "Min", "Max")
+	
+
+	results[1,] <- c(count, num_NAs, mean, median, sd, min, max)
+	return (round(results,2)) 
+}
+
+#df_replace_NaN <- df
+#df_replace_NaN[is.na (df_replace_NaN$Cq),"Cq"] = 43
+#df <- df_replace_NaN
+# doesn't make sense to replace NaN with 43 for logistic / linear regression
+#df <- df[!is.na(df$Cq),]
+
+summary_all_data <- ddply (df, c('Fluor', 'Final_Percentage_Fusion'), .fun=summary_function)
+stats_filename = paste (folder, "summary_statistics.csv", sep="")
+write.csv (summary_all_data, file=stats_filename, row.names=TRUE)
+
+
+#df[,"UniqueID"] = paste (df[,"Run"],df[,"Well"])
+
+#unique_id_list = unique (df[,"UniqueID"])
+
+df_TexasRed <- df[df$Fluor == "Texas Red", c("UniqueID", "Fluor", "Target", "Sample", "Cq", "Final_Percentage_Fusion")]
+df_FAM <- df[df$Fluor == "FAM", c("UniqueID", "Fluor", "Target", "Sample", "Cq")]
+
+channels <- merge (df_TexasRed ,df_FAM, by="UniqueID")
+channels <- channels[channels$Final_Percentage_Fusion > 0,]  # this removes Positive control
+
+# because 100% fusion dosen't have any WT DNA, the deltaCq is meaningless. Remove
+#channels <- channels[channels$Final_Percentage_Fusion != 100,]
+
+
+channels[,"deltaCq"] <- channels["Cq.y"] - channels["Cq.x"]
+channels[,"log2Conc"] <- log2(channels["Final_Percentage_Fusion"])
+
+
+# assign deltaCq to Cq so we cas use the summary function, thisis a hack.
+channels[,"Cq"] <- channels["deltaCq"]
+summary_Cq_data <- ddply (channels, c('Final_Percentage_Fusion'), .fun=summary_function)
+stats_filename = paste (folder, "deltaCq_statistics.csv", sep="")
+write.csv (summary_Cq_data, file=stats_filename, row.names=TRUE)
+
+
+# MANUAL THIS LINE BELOW SHOULD NOT BE USED FOR LOGIST OR PROBIT
+channels <- channels[!is.na(channels$deltaCq),]  # remove those that aren't called, don't assign 43
+
+#source ("C:\\Users\\ngpc4\\Documents\\Biostatistics\\R_functions.R.txt")
+
+
+
+#filename <- paste (folder, "Part2_FittedLogisticRegression.png", sep="")
+#part2_plot <- ggplot (channels, aes(x= log2 (Final_Percentage_Fusion) , y=deltaCq)) + 
+#  geom_point(color='#2980B9', size = 4) + 
+#  geom_smooth(method=lm, color='#2C3E50')
+
+#ggsave(filename, plot = part2_plot, device = "png")
+#dev.off()
+
+# 1.1 Part 2 
+# The parameter estimates from these models will be reported along with their respective standard errors and p values. 
+# it's lm (y ~ x)
+# LINEAR MODEL
+
+channels.lm <- lm ( deltaCq ~ log2 ( Final_Percentage_Fusion ), data=channels)
+summary (channels.lm)
+
+
+parameter_estimates_filename = paste (folder, "Part2_parameter_estimates.csv")
+sink (parameter_estimates_filename)
+print (summary (channels.lm))
+sink()
+
+
+
+#df_no_outliers <- ddply (channels, c('Final_Percentage_Fusion'), .fun=outlierKD_deltaCq)
+# outliers by linear regression, 5 standard deviations
+std_dev <- sd(channels[,"deltaCq"])
+abs (resid(channels.lm)) > std_dev *5  
+
+######STOP POINT -- inspect and make sure it's all FALSE -- no outliers
+
+# plot residuals
+resid (channels.lm)
+#plot (density (resid (channels.lm)))
+png (filename = paste (folder, "residuals.png",sep=""))
+plot (density (resid (channels.lm)/ std_dev), main = "Residuals normalized by standard deviation")
+dev.off()
+
+# plot linear regression
+
+plot_filename = paste (folder,"LoD_according_to_PI.png", sep="")
+png(filename=plot_filename)
+
+
+new.dat <- data.frame ('Final_Percentage_Fusion'=conc)
+attach (channels)
+x <- log2(Final_Percentage_Fusion)
+y <- deltaCq
+plot(log2 (Final_Percentage_Fusion), deltaCq, xlim=c(min(x), max(x)), ylim=c(min(y)-1, max(y)+1))
+abline(channels.lm, lwd=2)
+dev.off()
+
+
+# now make a linear model
+
+# HARD-CODED, taken from looking at deltaC_statistic.sv
+
+#MANUAL
+remove_because_partial_or_no_data <- c(3.11, 2.20, 1.56, 1.10, 0.78, 0.55,0.39)
+
+# CHOICE 1
+
+# all the data
+
+plot_filename = paste (folder,"LoD_PI_narrow_range_all_conc.png", sep="")
+parameter_estimates_filename = paste (folder, "Part2_parameter_estimates_all_conc.csv", sep ="")
+chan <- channels
+
+#CHOICE2
+channels_conc_data_complete <- channels[!(channels$Final_Percentage_Fusion %in% remove_because_partial_or_no_data),]
+plot_filename = paste (folder,"LoD_according_to_PI_narrow_range_remove_partial_data.png", sep="")
+parameter_estimates_filename = paste (folder, "Part2_parameter_estimates_remove_partial_data.csv", sep="")
+chan <- channels_conc_data_complete
+
+
+#############
+png(filename=plot_filename)
+
+# add prediction intervals (more relevant and generous)
+attach (chan)
+chan.lm <- lm ( deltaCq ~ log2 ( Final_Percentage_Fusion ), data=chan)
+summary (chan.lm)
+
+#write.csv (summary (chan.lm), file=parameter_estimates_filename)
+sink (parameter_estimates_filename)
+print (summary (chan.lm))
+sink()
+
+new.dat <- data.frame ('Final_Percentage_Fusion'=conc)
+PI <- predict (chan.lm, newdata = new.dat, interval='prediction', level=0.90)
+x<- log2(Final_Percentage_Fusion)
+y <- deltaCq
+
+plot(log2 (chan$Final_Percentage_Fusion),
+ chan$deltaCq, xlim=c(min(x), max(x)), ylim=c(min(y)-1, max(y)+1),
+ xlab="Log2 (Final Percentage Fusion)", ylab=expression(paste(Delta, "Ct"))
+  )
+
+abline(chan.lm, lwd=2)
+lines (log2(conc), PI[,"lwr"], col="green")
+lines (log2(conc), PI[,"upr"], col="red")
+
+# the fusion dilution where the top prediction limit crosses the cut-off will be estimated and chosen to be the models’ estimate of the C95
+# lm y ~ x . given cuttoff (x), get concentration
+upper.lm <- lm (PI[,"upr"] ~ log2(conc)  )
+slope <- upper.lm$coefficients[2]
+intercept <- upper.lm$coefficients[1]
+
+
+
+
+cutoffs <- c(15)
+
+# y = mx + b
+# x = (y-b)/m
+
+
+#C95 = (cutoffs - intercept )/slope
+C95 = (cutoffs - intercept)/slope
+conc_LoD = 2^C95
+
+segments (log2(conc[9]), cutoffs[1], C95[1], cutoffs[1], col="purple")
+segments(C95[1], min(x), C95[1], cutoffs[1], col="purple")
+
+
+#segments (log2(conc[9]), cutoffs[2], C95[2], cutoffs[2], col="purple")
+#segments(C95[2],min(x), C95[2], cutoffs[2], col="purple")
+
+#abline (v=C95[1], lty=2) # dashed line
+#abline (h=cutoff, lty=2)
+
+detach (chan)
+dev.off()
+
+
+############### END SECTION
+
+#Test for Homoscedasticity
+
+#channels["resid"] <- resid (channels.lm)
+
+#plot(log2 (channels$Final_Percentage_Fusion),
+# channels$resid, 
+# xlab="Log2 (Final Percentage Fusion)", ylab="Residuals")
+ 
+
