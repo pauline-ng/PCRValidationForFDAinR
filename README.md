@@ -1,7 +1,9 @@
 # PCRValidationForFDAinR
-R scripts for validating a PCR companion diagnostic for the FDA. 
+This repository contains R scripts for validating a PCR companion diagnostic for the FDA. 
 
 This isn't production-level code, but it'll do the job.
+
+To find what the output looks like, please refer to: [series of posts blog] (https://paulinepi.com/2018/11/fda-validation-of-companion-diagnostic-pcr-test-part-1/)
 
 To run this locally, download the scripts and look for the words
 
