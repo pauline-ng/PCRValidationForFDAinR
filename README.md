@@ -8,6 +8,7 @@ To find what the output looks like, please refer to: https://paulinepi.com/2018/
 To run this locally, download the scripts and look for the words
 
 **SET**
+
 **MANUAL**
 
 **SET**: Refers to variables you'll have to set.
