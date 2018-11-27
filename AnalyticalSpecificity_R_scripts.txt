@@ -2,9 +2,10 @@ library (tolerance)
 library (plyr)
 library (EnvStats)
 
-
+# SET OUTPUT FOLDER
 folder = "C:\\Users\\ngpc4\\Documents\\FusionB\\AnalyticalSpecificity\\"
 
+# SET FILE PATH FOR PCR DATA
 filename = "C:\\Users\\ngpc4\\Documents\\FusionB\\EDTA_EtOH_combined.csv"
 
 
@@ -14,13 +15,14 @@ whole_df <- read.csv (filename, header=TRUE)
 whole_df[,"UniqueID"] = paste (whole_df[,"Run"],whole_df[,"Well"])
 
 # remove more problematic wells
+# SET PATH TO FILE FOR WELLS TO EXCLUDE
 df_problem <- read.csv ("C:\\Users\\ngpc4\\Documents\\FusionB\\wells_to_exclude.csv", header=TRUE)
 problem_samples <- paste (df_problem[,"Run"], df_problem[,"Well"])
 whole_df <- whole_df[!(whole_df$UniqueID %in% problem_samples), ]
 
 
 ## READ IN DATA
-# OPTION 1
+# OPTION 1, SET WHICH RUNS ARE EDTA
 chemical = "EDTA"
 EDTA_runs <- c("VP-3005-002_P05_F04_001_R00", "VP-3005-002_P05_F04_002_R00", "VP-3005-002_P05_F04_003_R00", "VP-3005-002_P05_F04_004_R00")
 df <- whole_df[whole_df$Run %in% EDTA_runs,]
@@ -29,7 +31,7 @@ df[df$Run %in% EDTA_runs, "Chemical"] <- "EDTA"
 
 
 
-# OPTION 2
+# OPTION 2, SET WHICH RUNS ARE ETHANOL
 #chemical = "Ethanol"
 #EtOH_runs <- c("VP-3005-002_P05_F02_001_R00","VP-3005-002_P05_F02_002_R00","VP-3005-002_P05_F02_003_R00", "VP-3005-002_P05_F02_004_R00")
 #df <- whole_df[whole_df$Run %in% EtOH_runs,]
@@ -49,16 +51,20 @@ df <- df[df$Sample != 'PC' & df$Sample != 'NTC',]   # drop PC and NTC - just loo
 
 df["Spikein_Level"] <- vector ( ,length=nrow (df))
 
+# SET CONCENTRATIONS FOR ETHANOL AND EDTA
 EtOH_conc <- c(4, 2, 1, 0.5, 0.25, 0.125, 0.063, 0.031, 0.016, 0)
 EDTA_conc <- c(20, 10, 5, 2.5, 1.25, 0.625, 0.313,0.156, 0.078,0)
 
-# choose appropriate chemical
+# MANUAL: choose appropriate chemical
+# Run the script once  with chemical set to "EDTA"
+# Run the script a second time with chemical set to "EtOH"
+# commands below restricts data frame to one chemical only
 if (chemical == "EDTA") {
 	chem_conc <- EDTA_conc
-	#df <- df[df$Sample_no_number == 'PC2_EDTA' | df$Sample_no_number == 'WT High' | df$Sample_no_number == 'WT Low' | df$Sample_no_number == 'NTC_EDTA',]
+	df <- df[df$Sample_no_number == 'PC2_EDTA' | df$Sample_no_number == 'WT High' | df$Sample_no_number == 'WT Low' | df$Sample_no_number == 'NTC_EDTA',]
 } else if (chemical == "Ethanol") {
 	chem_conc <- EtOH_conc
-	#df <- df[df$Sample_no_number == 'PC-E' | df$Sample_no_number == 'WT-high-E' | df$Sample_no_number == 'WT-Low-E' | df$Sample_no_number == 'NTC-E',]
+	df <- df[df$Sample_no_number == 'PC-E' | df$Sample_no_number == 'WT-high-E' | df$Sample_no_number == 'WT-Low-E' | df$Sample_no_number == 'NTC-E',]
 }
 
 
@@ -80,7 +86,7 @@ df$Sample_no_number <- factor (df$Sample_no_number)
 df$Content <- factor (df$Content)
 
 
-# asign new names 
+# assign new names (some name cleaning by the request of wetlab) 
 # This MUST come after when PC and NTC have been dropped
 df[df$Sample_no_number=="NTC-E", "SampleType2"] = "NTC sample"
 df[df$Sample_no_number=="NTC-EDTA", "SampleType2"] = "NTC sample"
@@ -243,10 +249,10 @@ write.csv (summary_all_data, file = summary_data_filename, row.names=TRUE)
 
 cleaned_df <- df[!is.na(df$Cq),]
 
-#df_no_outliers <- ddply (cleaned_df, c('Fluor', 'Spikein_Level', 'Sample_no_number'), .fun=outlierKD)
+df_no_outliers <- ddply (cleaned_df, c('Fluor', 'Spikein_Level', 'Sample_no_number'), .fun=outlierKD)
 
 summary_cleaned_data <- ddply (df, c('Fluor', 'Spikein_Level', 'Sample_no_number'), .fun=summary_function)
-#ddply (df_no_outliers, c('Fluor', 'Spikein_Level', 'Sample_no_number'), .fun= shapiro_normality_test)
+ddply (df_no_outliers, c('Fluor', 'Spikein_Level', 'Sample_no_number'), .fun= shapiro_normality_test)
 
 df_control = cleaned_df[cleaned_df$Content == "Unkn-10",]  # this is the control
 if (nrow (df_control) > 0) {
