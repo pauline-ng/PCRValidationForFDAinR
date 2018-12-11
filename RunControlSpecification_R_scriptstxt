@@ -2,6 +2,7 @@ library (tolerance)
 library (plyr)
 library (EnvStats)
 
+# SET filename, folder, runs_to_keep
 filename = "C:\\Users\\ngpc4\\Documents\\FusionB\\all_combined.csv"
 folder="C:\\Users\\ngpc4\\Documents\\FusionB\\RunControlSpecification\\"
 df <- read.csv (filename, header=TRUE)
@@ -9,7 +10,7 @@ runs_to_keep <- readLines ("C:\\Users\\ngpc4\\Documents\\FusionB\\RunControlSpec
 df <- df[df$Run %in% runs_to_keep,]
 df[,"UniqueID"] = paste (df[,"Run"],df[,"Well"])
 
-# remove more problematic wells
+# SET the wells to exclude (remove more problematic wells)
 df_problem <- read.csv ("C:\\Users\\ngpc4\\Documents\\FusionB\\wells_to_exclude.csv", header=TRUE)
 problem_samples <- paste (df_problem[,"Run"], df_problem[,"Well"])
 df <- df[!(df$UniqueID %in% problem_samples), ]
@@ -42,6 +43,7 @@ levels(droplevels(all_controls$Fluor))
 
 
 #source("http://goo.gl/UUyEzD")
+# SET path to R functions
 source ("C:\\Users\\ngpc4\\Documents\\Biostatistics\\R_functions.R.txt")
 
 png(filename= paste (folder, "TexRed_outlier.png", sep =""))
@@ -71,7 +73,7 @@ shapiro.test (pc_Cy5_noOutliers$Cq)
 shapiro.test (pc_Fam_noOutliers$Cq)
 shapiro.test (negative_control_noOutliers$Cq)
 
-#alpha_num = 1 – confidence level
+#alpha_num = 1 â€“ confidence level
 #normtol.int (ct_values, alpha = alpha_num, P = coverage_level, side=2)
 # test
 # nptol.int (df$Ct, alpha=alpha_num, P= coverage_level, side=2)
