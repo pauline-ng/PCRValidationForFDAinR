@@ -1,0 +1,149 @@
+summary_function <- function (df) {
+	cleaned_df <- df[!is.na(df$Cq),]
+       count <- nrow (cleaned_df)
+       mean <- mean (cleaned_df$Cq)
+	median <- median (cleaned_df$Cq)
+	sd <- sd (cleaned_df$Cq)
+	cv <- sd/mean *100
+               results <- data.frame (matrix (ncol=13,nrow=1))
+	percentiles <- quantile(cleaned_df$Cq, probs = c(0.01, 0.05, 0.1, 0.90, .95, .99))
+	min <- min (cleaned_df$Cq)
+	max <- max (cleaned_df$Cq)
+	colnames (results) <- c("Number of observations", "Mean", "Median", "Standard Deviation", "% CV", "1rst", "5th", "10th", "90th", "95th", "99th", "Minimum", "Maximum")
+	
+
+	results[1,] <- c(count, mean, median, sd, cv, percentiles, min, max)
+	return (round (results,2)) 
+}
+
+summary_function_deltaCq <- function (df) {
+	cleaned_df <- df[!is.na(df$deltaCq),]
+       count <- nrow (cleaned_df)
+       mean <- mean (cleaned_df$deltaCq)
+	median <- median (cleaned_df$deltaCq)
+	sd <- sd (cleaned_df$deltaCq)
+	cv <- abs(sd/mean * 100)
+               results <- data.frame (matrix (ncol=13,nrow=1))
+	percentiles <- quantile(cleaned_df$deltaCq, probs = c(0.01, 0.05, 0.1, 0.90, .95, .99))
+	min <- min (cleaned_df$deltaCq)
+	max <- max (cleaned_df$deltaCq)
+	colnames (results) <- c("Number of observations", "Mean", "Median", "Standard Deviation", "% CV", "1rst", "5th", "10th", "90th", "95th", "99th", "Minimum", "Maximum")
+	
+
+	results[1,] <- c(count, mean, median, sd, cv, percentiles, min, max)
+	return (round (results,2)) 
+}
+
+
+
+outlier5stddev <-  function (df) {
+	cleaned_df <- df[!is.na(df$Cq),]
+       	count <- nrow (cleaned_df)
+       	mean <- mean (cleaned_df$Cq)
+	sd <- sd (cleaned_df$Cq)
+
+	upperlimit <- mean + 5 * sd
+	lowerlimit <- mean - 5 * sd
+
+	return (df[df$Cq >= lowerlimit & df$Cq <= upperlimit,])
+
+}
+
+# for oultlierKD
+#source("http://goo.gl/UUyEzD")
+
+#The outlier limits are calculated using the following formulas: Q1 – 1.5 x IQR and Q3 + 1.5 x IQR,
+outlierKD <- function(dt, var) {
+  var_name <- eval(substitute(var),eval(dt))
+  tot <- sum(!is.na(var_name))
+  na1 <- sum(is.na(var_name))
+  m1 <- mean(var_name, na.rm = T)
+  par(mfrow=c(2, 2), oma=c(0,0,3,0))
+  boxplot(var_name, main="With outliers")
+  hist(var_name, main="With outliers", xlab=NA, ylab=NA)
+  outlier <- boxplot.stats(var_name)$out
+  print ("outliers")
+  print (outlier)
+  print (paste (dt[var_name %in% outlier,"UniqueID"], collapse=''))
+
+  mo <- mean(outlier)
+  var_name <- ifelse(var_name %in% outlier, NA, var_name)
+  boxplot(var_name, main="Without outliers")
+  hist(var_name, main="Without outliers", xlab=NA, ylab=NA)
+  title("Outlier Check", outer=TRUE)
+  na2 <- sum(is.na(var_name))
+  message("Outliers identified: ", na2 - na1, " from ", tot, " observations")
+  message("Proportion (%) of outliers: ", (na2 - na1) / tot*100)
+  message("Mean of the outliers: ", mo)
+  m2 <- mean(var_name, na.rm = T)
+  message("Mean without removing outliers: ", m1)
+  message("Mean if we remove outliers: ", m2)
+  cleaned_dt <- dt[!(dt$Cq %in% outlier), ] 
+  return (cleaned_dt)
+
+ # response <- readline(prompt="Do you want to remove outliers and to replace with NA? [yes/no]: ")
+ # if(response == "y" | response == "yes"){
+    dt[as.character(substitute(var))] <- invisible(var_name)
+    assign(as.character(as.list(match.call())$dt), dt, envir = .GlobalEnv)
+    message("Outliers successfully removed", "\n")
+    return(invisible(dt))
+ # } else{
+ #   message("Nothing changed", "\n")
+ #   return(invisible(var_name))
+ # }
+}
+
+
+# DEFINE FUNCTIONS, looking for column $Ct, Fluor, Target, and Sample
+normtol_function <- function (df, alpha_num, coverage_level) { 
+       cleaned_df <- df[!is.na(df$Cq),]
+       return (normtol.int (cleaned_df$Cq, alpha=alpha_num, P= coverage_level, side=2) )
+}
+nptol_function <- function (df, alpha_num, coverage_level) { 
+       cleaned_df <- df[!is.na(df$Cq),]
+       result <- (nptol.int (cleaned_df$Cq, alpha=alpha_num, P= coverage_level, side=2) )
+     #  lower_bound <- result[result$"2-sided.lower",]
+     #  upper_bound <- result[result$"2-sided.upper",]
+	return (round(result,2))
+}
+
+outlierKD_deltaCq <- function(dt) {
+  
+  var_name <- eval(substitute(deltaCq),eval(dt))
+  tot <- sum(!is.na(var_name))
+  na1 <- sum(is.na(var_name))
+  m1 <- mean(var_name, na.rm = T)
+  par(mfrow=c(2, 2), oma=c(0,0,3,0))
+  boxplot(var_name, main="With outliers")
+  hist(var_name, main="With outliers", xlab=NA, ylab=NA)
+  outlier <- boxplot.stats(var_name)$out
+#  cleaned_dt <- dt[!(dt$Cq %in% outlier), ] 
+#  return (cleaned_dt)
+
+  mo <- mean(outlier)
+  var_name <- ifelse(var_name %in% outlier, NA, var_name)
+  boxplot(var_name, main="Without outliers")
+  hist(var_name, main="Without outliers", xlab=NA, ylab=NA)
+  title("Outlier Check", outer=TRUE)
+  na2 <- sum(is.na(var_name))
+  message("Outliers identified: ", na2 - na1, " from ", tot, " observations")
+  message("Proportion (%) of outliers: ", (na2 - na1) / tot*100)
+  message("Mean of the outliers: ", mo)
+  m2 <- mean(var_name, na.rm = T)
+  message("Mean without removing outliers: ", m1)
+  message("Mean if we remove outliers: ", m2)
+  
+ cleaned_dt <- dt[!(dt$Cq %in% outlier), ] 
+  return (cleaned_dt)
+
+ # response <- readline(prompt="Do you want to remove outliers and to replace with NA? [yes/no]: ")
+ # if(response == "y" | response == "yes"){
+ #   dt[as.character(substitute(var))] <- invisible(var_name)
+ #   assign(as.character(as.list(match.call())$dt), dt, envir = .GlobalEnv)
+ #   message("Outliers successfully removed", "\n")
+ #   return(invisible(dt))
+ # } else{
+  #  message("Nothing changed", "\n")
+  #  return(invisible(var_name))
+ # }
+}
