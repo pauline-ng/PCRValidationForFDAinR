@@ -1,0 +1,454 @@
+library (tolerance)
+library (plyr)
+library (EnvStats)
+library (ggplot2)
+library(forcats)
+
+summary_function <- function (df) {
+	total <- nrow (df)
+	num_NAs <- nrow (df[is.na(df$Cq),])
+	cleaned_df <- df[!is.na(df$Cq),]
+       count <- nrow (cleaned_df)
+       mean <- mean (cleaned_df$Cq)
+	median <- median (cleaned_df$Cq)
+	sd <- sd (cleaned_df$Cq)
+	cv <- sd/mean
+               results <- data.frame (matrix (ncol=2,nrow=1))
+	percentiles <- quantile(cleaned_df$Cq, probs = c(0.01, 0.05, 0.1, 0.90, .95, .99))
+	min <- min (cleaned_df$Cq)
+	max <- max (cleaned_df$Cq)
+
+	sd5 <- 5 * sd
+	beyond_5sd <- nrow (cleaned_df[cleaned_df$Cq > mean + sd5,])	
+	beyond_5sd <- beyond_5sd + nrow (cleaned_df[cleaned_df$Cq < mean - sd5,])
+	results <- data.frame (matrix (ncol=8,nrow=1))
+
+	colnames (results) <- c( "Number of NAs", "Number of observations","Mean", "Median", "SD", "Minimum", "Maximum", "Beyond 5 standard deviations")
+	
+	results[1,] <- c(num_NAs, count, mean, median, sd, min, max, beyond_5sd)
+	return (results) 
+}
+
+
+anova_function <- function (df) {
+	cleaned_df <- df[!is.na(df$deltaCq),]
+	attach (df)
+}
+
+anova_stat_function <- function (anova_results) {
+	anova_df <- as.data.frame(matrix(nrow = nrow (anova_results) ))
+	row.names (anova_df) <- row.names (anova_results)
+
+	sum_of_squares_column = 1
+	degrees_of_freedom_column = 2
+	
+	anova_df["Variance"] = round (anova_results[sum_of_squares_column]/anova_results[degrees_of_freedom_column],2)
+	anova_df["Degrees of Freedom"] <- anova_results[degrees_of_freedom_column]
+	anova_df["Precision"] = round (sqrt (anova_df["Variance"]),2)
+	# confidence interval is sum of squares divided by chi square
+	chisq97.5 <- qchisq (0.975, anova_results[[degrees_of_freedom_column]])
+	chisq2.5 <- qchisq (0.025, anova_results[[degrees_of_freedom_column]])
+	anova_df["Lower 95% CI"] = round (anova_results[sum_of_squares_column]/chisq97.5, 2)
+	anova_df["Upper 95% CI"] = round(anova_results[sum_of_squares_column]/chisq2.5, 2) 
+
+	return (anova_df)
+}
+
+
+binomial_function <- function (df) {
+	if (nrow (df[df$SampleType == "FFPE",]) ) {
+		cutoff = 5
+	} else {
+		cutoff = 13
+	}
+	total_obs <- nrow (df)
+	num_NAs <- sum (is.na (df$Cq))
+	cleaned_df <- df[!is.na(df$Cq),]
+
+	totalrows <- nrow (cleaned_df)
+	rows_lt_cutoff <- nrow(cleaned_df[cleaned_df$deltaCq < cutoff,])
+
+	if (totalrows >0) {
+		test <- binom.test (rows_lt_cutoff, totalrows, p=1, alternative="two.sided", conf.level=0.90)
+		lowerCI <-  test$conf.int[1]
+		upperCI <- test$conf.int[2]
+	} else {
+		lowerCI <- "NA"
+		upperCI <- "NA"
+	}
+	results <- data.frame (matrix (ncol=6,nrow=1))
+	
+	colnames (results) <- c("Total", "Number of missing", "Number of observations", "Number of positive calls", "Lower CI", "Upper CI")
+	
+
+	results[1,] <- c(total_obs,num_NAs, totalrows, rows_lt_cutoff, lowerCI, upperCI)
+
+	return (results)
+}
+
+
+## SET PATHS AND FILENAMES. READ IN DATA
+filename = "C:\\Users\\ngpc4\\Documents\\FusionB\\Precision\\reproducibility\\reproducibility_combined_manual_columns_added.csv"
+folder = "C:\\Users\\ngpc4\\Documents\\FusionB\\Precision\\reproducibility\\"
+
+df <- read.csv (filename, header=TRUE)
+
+
+df[,"UniqueID"] = paste (df[,"Run"],df[,"Well"])
+
+unique_id_list = unique (df[,"UniqueID"])
+
+# SET FILE TO REMOVE BAD WELLS. change to global pah to remove wells
+wells_to_remove_filename <- "C:\\Users\\ngpc4\\Documents\\FusionB\\wells_to_exclude.csv"
+wells_to_remove_df <- read.csv(wells_to_remove_filename,header=TRUE)
+wells_to_remove_df[,"UniqueID"] = paste (wells_to_remove_df[,"Run"], wells_to_remove_df[,"Well"])
+
+df <- df[!(df$UniqueID %in% wells_to_remove_df[,"UniqueID"]), ] 
+
+
+#df[!(df$Sample %in% positive_samples), "SampleType"] = "Wild-type"
+#df[df$Sample %in% positive_samples,"SampleType"] = "Contains Fusion A"
+#df[df$Sample %in% c("PC", "PC1", "PC2"),"SampleType"] = "Positive Control"
+#df[df$Sample == "NTC", "SampleType"] = "Negative Control"
+
+# SET WHICH RUNS WERE OPERATOR 1 OR 2
+runs_with_operator1 <- c ("VP-3005-002 P03 F03_001_R01_28NOV18_990_GW",
+"VP-3005-002 P03 F03_002_R00_29NOV18_402_GW", 
+"VP-3005-002 P03 F03_005_R00_03DEC18_990_GW",
+"VP-3005-002 P03 F03_006_R00_04DEC18_402_GW",
+"VP-3005-002 P03 F03_009_R03_10DEC18_990_GW",
+"VP-3005-002 P03 F03_010_R01_11DEC18_402_GW",
+"VP-3005-002 P03 F03_013_R01_14DEC18_990_GW",
+"VP-3005-002 P03 F03_014_R01_15DEC18_402_GW",
+"VP-3005-002 P03 F03_017_R00_18DEC18_990_GW-manual_well_assignment",
+"VP-3005-002 P03 F03_018_R00_19DEC18_402_GW")
+
+runs_with_operator2 <- c ("VP-3005-002 P03 F03_003_R00_30NOV18_990_AJ",
+"VP-3005-002 P03 F03_004_R00_01DEC18_402_AJ",
+"VP-3005-002 P03 F03_007_R03_06DEC18_990_AJ",
+"VP-3005-002 P03 F03_008_R01_06DEC18_402_AJ",
+"VP-3005-002 P03 F03_011_R00_12DEC18_990_AJ",
+"VP-3005-002 P03 F03_012_R00_13DEC18_402_AJ",
+"VP-3005-002 P03 F03_015_R00_16DEC18_990_AJ",
+"VP-3005-002 P03 F03_016_R00_17DEC18_402_AJ",
+"VP-3005-002 P03 F03_019_R00_20DEC18_990_AJ",
+"VP-3005-002 P03 F03_020_R01_21DEC18_402_AJ")
+   
+df[df$Run %in% runs_with_operator1,   "Operator"] = "Operator1"
+df[df$Run %in% runs_with_operator2,   "Operator"] = "Operator2"
+
+# SET WHICH RUNS WERE INSTRUMENT 1 OR INSTRUMENT 2
+runs_with_instrument1 <- c (
+"VP-3005-002 P03 F03_001_R01_28NOV18_990_GW",
+"VP-3005-002 P03 F03_003_R00_30NOV18_990_AJ",
+"VP-3005-002 P03 F03_005_R00_03DEC18_990_GW",
+"VP-3005-002 P03 F03_007_R03_06DEC18_990_AJ",
+"VP-3005-002 P03 F03_009_R03_10DEC18_990_GW",
+"VP-3005-002 P03 F03_011_R00_12DEC18_990_AJ",
+"VP-3005-002 P03 F03_013_R01_14DEC18_990_GW",
+"VP-3005-002 P03 F03_015_R00_16DEC18_990_AJ",
+"VP-3005-002 P03 F03_017_R00_18DEC18_990_GW-manual_well_assignment",
+"VP-3005-002 P03 F03_019_R00_20DEC18_990_AJ")
+
+
+
+runs_with_instrument2 <- c (
+"VP-3005-002 P03 F03_002_R00_29NOV18_402_GW", 
+"VP-3005-002 P03 F03_004_R00_01DEC18_402_AJ",
+"VP-3005-002 P03 F03_006_R00_04DEC18_402_GW",
+"VP-3005-002 P03 F03_008_R01_06DEC18_402_AJ",
+"VP-3005-002 P03 F03_010_R01_11DEC18_402_GW",
+"VP-3005-002 P03 F03_012_R00_13DEC18_402_AJ",
+"VP-3005-002 P03 F03_014_R01_15DEC18_402_GW",
+"VP-3005-002 P03 F03_016_R00_17DEC18_402_AJ",
+"VP-3005-002 P03 F03_018_R00_19DEC18_402_GW",
+"VP-3005-002 P03 F03_020_R01_21DEC18_402_AJ")
+
+
+df[df$Run %in% runs_with_instrument1,   "Instrument"] = "Instrument1"
+df[df$Run %in% runs_with_instrument2,   "Instrument"] = "Instrument2"
+
+
+df[df$SampleSimple1 == "20%AbLoD", "SampleSimple"] = "20% above LoD"
+df[df$SampleSimple1 == "20%BlLoD", "SampleSimple"] = "20% below LoD"
+df[df$SampleSimple1 == "20%Bl LoD", "SampleSimple"] = "20% below LoD"
+df[df$SampleSimple1 == "3xLoD", "SampleSimple"] = "3x LoD"
+df[df$SampleSimple1 == "LoD", "SampleSimple"] = "LoD"
+
+df[df$SampleSimple1 == "NTC1", "SampleSimple"] = "Negative Control"
+df[df$SampleSimple1 == "NTC2", "SampleSimple"] = "Negative Control"
+
+df[df$SampleSimple1 == "PC1", "SampleSimple"] = "Positive Control"
+df[df$SampleSimple1 == "PC4", "SampleSimple"] = "Positive Control"
+
+df[df$SampleSimple1 == "WT Std Low", "SampleSimple"] = "WT Std Low"
+df[df$SampleSimple1 == "WT Std High", "SampleSimple"] = "WT Std High"
+
+#controls <- c("PC1", "PC2", "NTC1", "NTC2")
+#df <- df[!(df$Sample %in% controls), ] 
+
+# Cheuk Ka didn't want NTC or PTC plotted, comment this out if needing statistics. This was *not* commented out when
+# running ANOVA  for Fusion B, so ANOVA does not include Positive & Negative control
+df <- df[df$SampleSimple != "Positive Control",]
+df <- df[df$SampleSimple != "Negative Control",]
+
+# MANUAL CHOOSE FFPE OR FRESH FROZEN -- ONE OR THE OTHER. THE OTHER MUST BE COMMENTED OUT OR ELSE THERE IS AN ERROR.
+
+#df <- df[df$SampleType == "Fresh Frozen",]
+#outfolder <- paste (folder, "\\FreshFrozen\\", sep = "")
+
+# OR
+
+df <- df[df$SampleType == "FFPE",]
+outfolder <- paste (folder, "\\FFPE\\", sep = "")
+
+x1  = factor(x, levels=c("20% below LoD", "LoD", "20% above LoD", "3x LoD"))
+
+
+
+#mydata$Treatment = factor(mydata$Treatment,c("L","M","H"))
+
+x2 = c("20% below LoD", "LoD", "20% above LoD", "3x LoD")
+
+df$Sample = factor (df$Sample, levels=unique (df$Sample))
+
+df$SampleSimple = factor (df$SampleSimple, levels=unique (df$SampleSimple))
+# this should reorder labels
+df$SampleSimple = factor (df$SampleSimple, c("20% below LoD", "LoD", "20% above LoD", "3x LoD", "WT Std High", "WT Std Low"))
+
+
+df[,"UniqueID"] = paste (df[,"Run"],df[,"Well"])
+unique_id_list = unique (df[,"UniqueID"])
+df_TexasRed <- df[df$Fluor == "Texas Red", c("UniqueID", "Fluor", "Target", "Run", "Instrument", "Operator", "Batch", "Sample", "Cq",  "SampleType", "SampleSimple")]
+df_FAM <- df[df$Fluor == "FAM", c("UniqueID", "Fluor", "Target", "Sample", "Cq")]
+
+
+channels <- merge (df_TexasRed ,df_FAM, by="UniqueID")
+
+channels[,"deltaCq"] <- channels["Cq.y"] - channels["Cq.x"]
+
+ 
+#fakeit
+channels[,"Cq"] <- channels[,"deltaCq"]
+
+
+
+
+summary_all_data <- ddply (df, c('Fluor', 'SampleSimple', "Run", "Operator", "Batch", "Instrument" ), .fun=summary_function)
+results_filename = paste (outfolder, "reproducibility_summary_statistics.csv", sep="")
+write.csv(summary_all_data, file = results_filename,row.names=TRUE)
+
+summary_all_data <- ddply (df, c('Fluor', 'SampleSimple'), .fun=summary_function)
+results_filename = paste (outfolder, "reproducibility_summary_statistics_fewer_groups.csv", sep="")
+write.csv(summary_all_data, file = results_filename,row.names=TRUE)
+
+
+summary_deltaCq <- ddply (channels, c('SampleSimple', "Run", "Operator", "Batch", "Instrument"), .fun=summary_function)
+results_filename = paste (outfolder, "reproducibility_summary_statistics_deltaCq.csv", sep="")
+write.csv(summary_deltaCq, file = results_filename,row.names=TRUE)
+
+summary_deltaCq <- ddply (channels, c('SampleSimple'), .fun=summary_function)
+results_filename = paste (outfolder, "reproducibility_summary_statistics_deltaCq_fewer_groups.csv", sep="")
+write.csv(summary_deltaCq, file = results_filename,row.names=TRUE)
+
+
+
+# remove if more than 5 standard deviations -- this is MANUAL CLEANING
+#channels <- channels[channels$UniqueID != "F03_015 A04",]
+#df <- df[df$UniqueID != "F03_015 A04",]
+
+
+
+
+
+fusion_call <- ddply (channels, c('SampleSimple', "Run", "Operator", "Batch", "Instrument"), .fun=binomial_function)
+results_filename = paste (outfolder, "fusion_calls.csv", sep="")
+write.csv (fusion_call, file=results_filename, row.names=TRUE)
+
+
+
+fusion_call <- ddply (channels, c('SampleSimple'), .fun=binomial_function)
+results_filename = paste (outfolder, "fusion_calls_fewer_groups.csv", sep="")
+write.csv (fusion_call, file=results_filename, row.names=TRUE)
+
+
+
+cleaned_channels <- channels[!is.na(channels$deltaCq),]
+
+attach (cleaned_channels)
+anova (aov (deltaCq ~ factor (SampleSimple) + factor (Batch)))
+
+subset_df <- df[df$Fluor == "Texas Red",]
+attach (subset_df)
+ anova (aov (Cq ~ factor (Sample) + factor (Operator) + factor (Instrument) + factor (Batch) + factor (Run)))
+
+#https://www.statmethods.net/stats/anova.html
+#Type 1 Sequential SS
+
+effects <- c("Run", "Operator", "Batch", "Instrument")
+
+for (effect in effects) {
+  plot_filename = paste (outfolder, effect ,"_effect_on_deltaCq.png", sep="")
+  png (plot_filename, width = 900, height = 600)
+  if (effect == "Run") {
+	
+	attach (cleaned_channels)
+	theplot <- interaction.plot (SampleSimple, Run, Cq, xlab="", ylab=expression(paste(Delta, "Ct")), col=palette(rainbow(6)), mar=c(10,10,2,2), cex.main=1.5, cex.lab=1.5,cex.axis=1.5, legend=FALSE) 
+  } else {
+  	theplot <- ggplot(data = channels, aes(x=SampleSimple, y=deltaCq)) + geom_boxplot(aes(fill= eval(as.name(effect))  )) + labs(x="",y=expression(paste(Delta, "Ct")), fill="") + theme(text = element_text(size=20))
+  }
+  print (theplot)
+  dev.off()
+
+  summary_all_data <- ddply (channels, c('SampleSimple', effect), .fun=summary_function)
+  fusion_call <- ddply (channels, c('SampleSimple', effect), .fun=binomial_function)
+
+  results_filename = paste (outfolder, effect ,"_effect_on_deltaCq.csv", sep="")
+  write.table(summary_all_data, file = results_filename,row.names=FALSE, col.names=TRUE, quote=FALSE, sep=",")
+  write.table (fusion_call, file=results_filename, append=TRUE, row.names=FALSE, col.names=TRUE, quote=FALSE, sep=",")
+  
+
+
+
+}
+
+
+fluors = c("Texas Red", "FAM")
+for (fluor in fluors) {
+for (effect in effects) {
+
+	
+	subset_df <- df[df$Fluor == fluor,]
+	attach (subset_df)
+ 	anova_results <- anova (aov (Cq ~ factor (Sample) + factor (eval(as.name(effect)))))
+	anova_stats <- anova_stat_function (anova_results)
+
+
+
+	#plot_filename = paste (folder, fluor, "_", effect ,".png", sep="")
+#plot_chart <- interaction.plot (Sample, eval(as.name(effect)), Cq, type="p")
+
+	if (effect == "Run") {
+		plot_filename = paste (outfolder, effect ,"_effect_on_", fluor, ".png", sep="")
+		png (plot_filename, width = 900, height = 600)
+		cleaned_df <- df[!is.na (df$Cq),]
+		subset_df <- cleaned_df[cleaned_df$Fluor == fluor,]
+		
+
+		attach (subset_df)
+		theplot <- interaction.plot (SampleSimple, Run, Cq, xlab="", ylab="Ct", mar=c(10,10,2,2), cex.main=2, cex.lab=2,cex.axis=2, cex=2, legend=FALSE)
+		print (theplot)
+		dev.off()
+	} else {
+	  plot_filename = paste (outfolder, effect ,"_effect_on_", fluor, ".png", sep="")
+	  png (plot_filename, width = 800, height = 600)
+ 	 theplot <- ggplot(data = subset_df, aes(x=SampleSimple, y=Cq)) + geom_boxplot(aes(fill= eval(as.name(effect))  )) + labs(x="",y="Ct", fill="") + theme(text = element_text(size=20))
+ 	 print (theplot)
+ 	 dev.off()
+
+	}
+
+	
+  summary_all_data <- ddply (subset_df, c('SampleSimple', 'Fluor', effect), .fun=summary_function)
+  fusion_call <- ddply (subset_df, c('SampleSimple', 'Fluor', effect), .fun=binomial_function)
+
+  results_filename = paste (outfolder, effect ,"_effect_on_", fluor, ".csv", sep="")
+
+  write.table(summary_all_data, file = results_filename,row.names=FALSE, col.names=TRUE, quote=FALSE, sep=",")
+  write.table (fusion_call, file=results_filename, append=TRUE, row.names=FALSE, col.names=TRUE, quote=FALSE, sep=",")
+  write.table (anova_stats, file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+  
+
+}
+
+
+  summary_all_data <- ddply (subset_df, c('SampleSimple', 'Fluor', effect), .fun=summary_function)
+  fusion_call <- ddply (subset_df, c('SampleSimple', 'Fluor', effect), .fun=binomial_function)
+
+  results_filename = paste (outfolder, effect ,"_effect_on_", fluor, ".csv", sep="")
+
+  write.table(summary_all_data, file = results_filename,row.names=FALSE, col.names=TRUE, quote=FALSE, sep=",")
+  write.table (fusion_call, file=results_filename, append=TRUE, row.names=FALSE, col.names=TRUE, quote=FALSE, sep=",")
+  
+
+}
+
+library (car)
+ Anova (aov (deltaCq ~ factor (SampleSimple) + factor (Batch) + factor (Operator) + factor (Instrument)  ), type = "III")
+
+  # ANOVA
+# do it by each factor, not enough data points to do it by all factors due to singular data points
+  
+results_filename = paste (outfolder, "deltaCq_ANOVA.csv", sep="")  
+line = "no fixed blocking effects"
+cleaned_channels <- channels[!is.na(channels$deltaCq),]
+attach (cleaned_channels)
+
+anova_results <- Anova (aov (deltaCq ~ factor (SampleSimple), data=cleaned_channels ), type = "III", singular.ok=TRUE)
+anova_stats <- anova_stat_function (anova_results)
+write (line, file = results_filename)
+write.table (anova_results, file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+write.table (anova_stats, file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+
+# March 20, 2018
+# https://www.r-bloggers.com/anova-%E2%80%93-type-iiiiii-ss-explained/
+# confirmed type III with link above
+# changed to add interaction effects
+
+
+for (effect in effects) {
+  results_filename = paste (outfolder, "deltaCq_ANOVA.csv", sep="")
+  cleaned_channels <- channels[!is.na(channels$deltaCq),]
+
+  attach (cleaned_channels)
+  anova_results <- Anova (aov (deltaCq ~ factor (SampleSimple) * factor (  eval(as.name(effect))  )  , data=cleaned_channels), type = "III")
+
+# adding contrasts - no need, manually checked already
+ # anova_results <- options (cont
+#Anova (lm (deltaCq ~ factor (SampleSimple) + factor (  eval(as.name(effect))  ) , 
+#contrasts=list(factor (SampleSimple) =contr.sum, factor (  eval(as.name(effect)
+			
+  anova_stats <- anova_stat_function (anova_results)
+  write (paste ("####\nSample * ",effect,"\n",sep=""), file=results_filename, append=TRUE)
+  write.table (anova_results, file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+ write.table (anova_stats, file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+  
+}
+
+ # do ANOVA on just the effect (e.g. Instrument or Run), remove sample type as a factor.
+# to see if it's within 15% of CV
+sampletypes <- c("20% below LoD", "LoD", "20% above LoD", "3x LoD")
+sig_effects <- c("Instrument", "Run")
+for (effect in sig_effects) {
+for (sampletype in sampletypes) {
+  results_filename = paste (outfolder, "deltaCq_ANOVA.csv", sep="")
+  cleaned_channels <- channels[!is.na(channels$deltaCq),]
+  subsetted_channels <- cleaned_channels[cleaned_channels$SampleSimple == sampletype,]
+  anova_results <- Anova (aov (deltaCq ~  factor (  eval(as.name(effect))  )  , data=subsetted_channels), type = "III")
+
+
+			
+  anova_stats <- anova_stat_function (anova_results)
+  write (paste ("####\n", sampletype, "\n", effect,"\n",sep=""), file=results_filename, append=TRUE)
+  write.table (round(anova_results,2), file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+  write.table (anova_results, file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+ write.table (anova_stats, file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+} # end sample types
+}
+
+for (fluor in fluors) {
+for (effect in effects) {
+   results_filename = paste (outfolder, fluor, "_Cq_ANOVA.csv", sep="")
+   subset_df <- df[df$Fluor == fluor,]
+   attach (subset_df)
+   anova_results <- Anova (aov (Cq ~ factor (SampleSimple) * factor (  eval(as.name(effect))  ) , data=subset_df), type = "III")
+   anova_stats <- anova_stat_function (anova_results)
+   write (paste ("####\n",effect,"\n",sep=""), file=results_filename, append=TRUE)
+   write.table (round(anova_results,2), file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+   write.table (anova_results, file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+   write.table (anova_stats, file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+  	
+
+}
+}
+

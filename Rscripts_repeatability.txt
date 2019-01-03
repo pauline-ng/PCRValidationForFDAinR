@@ -1,0 +1,294 @@
+library (tolerance)
+library (plyr)
+library (EnvStats)
+library (ggplot2)
+
+summary_function <- function (df) {
+	total <- nrow (df)
+	num_NAs <- nrow (df[is.na(df$Cq),])
+	cleaned_df <- df[!is.na(df$Cq),]
+       count <- nrow (cleaned_df)
+       mean <- mean (cleaned_df$Cq)
+	median <- median (cleaned_df$Cq)
+	sd <- sd (cleaned_df$Cq)
+	cv <- sd/mean
+               results <- data.frame (matrix (ncol=2,nrow=1))
+	percentiles <- quantile(cleaned_df$Cq, probs = c(0.01, 0.05, 0.1, 0.90, .95, .99))
+	min <- min (cleaned_df$Cq)
+	max <- max (cleaned_df$Cq)
+
+	sd5 <- 5 * sd
+	beyond_5sd <- nrow (cleaned_df[cleaned_df$Cq > mean + sd5,])	
+	beyond_5sd <- beyond_5sd + nrow (cleaned_df[cleaned_df$Cq < mean - sd5,])
+	results <- data.frame (matrix (ncol=8,nrow=1))
+
+	colnames (results) <- c( "Number of NAs", "Number of observations","Mean", "Median", "SD", "Minimum", "Maximum", "Beyond 5 standard deviations")
+	
+	results[1,] <- c(num_NAs, count, mean, median, sd, min, max, beyond_5sd)
+	return (round(results,2)) 
+}
+
+anova_stat_function <- function (anova_results) {
+	anova_df <- as.data.frame(matrix(nrow = nrow (anova_results) ))
+	row.names (anova_df) <- row.names (anova_results)
+
+	sum_of_squares_column = 1
+	degrees_of_freedom_column = 2
+	
+	anova_df["Variance"] = anova_results[sum_of_squares_column]/anova_results[degrees_of_freedom_column]
+	anova_df["Degrees of Freedom"] <- anova_results[degrees_of_freedom_column]
+	anova_df["Precision"] = sqrt (anova_df["Variance"])
+	# confidence interval is sum of squares divided by chi square
+	chisq97.5 <- qchisq (0.975, anova_results[[degrees_of_freedom_column]])
+	chisq2.5 <- qchisq (0.025, anova_results[[degrees_of_freedom_column]])
+	anova_df["Lower 95% CI"] = anova_results[sum_of_squares_column]/chisq97.5
+	anova_df["Upper 95% CI"] = anova_results[sum_of_squares_column]/chisq2.5
+
+	return (anova_df)
+}
+
+anova_function <- function (df) {
+	cleaned_df <- df[!is.na(df$deltaCq),]
+	attach (df)
+}
+
+binomial_function <- function (df) {
+	if (nrow (df[df$SampleType == "FFPE",]) ) {
+		cutoff = 5
+	} else {
+		cutoff = 13
+	}
+	total_obs <- nrow (df)
+	num_NAs <- sum (is.na (df$Cq))
+	cleaned_df <- df[!is.na(df$Cq),]
+
+	totalrows <- nrow (cleaned_df)
+	rows_lt_cutoff <- nrow(cleaned_df[cleaned_df$deltaCq < cutoff,])
+
+	if (totalrows >0) {
+		test <- binom.test (rows_lt_cutoff, totalrows, p=1, alternative="two.sided", conf.level=0.90)
+		lowerCI <-  test$conf.int[1]
+		upperCI <- test$conf.int[2]
+	} else {
+		lowerCI <- "NA"
+		upperCI <- "NA"
+	}
+	results <- data.frame (matrix (ncol=6,nrow=1))
+	
+	colnames (results) <- c("Total", "Number of missing", "Number of observations", "Number of positive calls", "Lower CI", "Upper CI")
+	
+
+	results[1,] <- c(total_obs,num_NAs, totalrows, rows_lt_cutoff, lowerCI, upperCI)
+
+	return (results)
+}
+
+
+## READ IN DATA
+# SET DATA PATH AND OUTPUT FOLDER
+
+filename = "C:\\Users\\ngpc4\\Documents\\FusionB\\Precision\\repeatability\\repeatability_combined.csv"
+
+
+
+ 
+df <- read.csv (filename, header=TRUE)
+
+
+df[,"UniqueID"] = paste (df[,"Run"],df[,"Well"])
+
+unique_id_list = unique (df[,"UniqueID"])
+
+# change to global wells_to_exclude file
+wells_to_remove_filename <- "C:\\Users\\ngpc4\\Documents\\FusionB\\wells_to_exclude.csv"
+wells_to_remove_df <- read.csv(wells_to_remove_filename,header=TRUE)
+wells_to_remove_df[,"UniqueID"] = paste (wells_to_remove_df[,"Run"], wells_to_remove_df[,"Well"])
+
+df <- df[!(df$UniqueID %in% wells_to_remove_df[,"UniqueID"]), ] 
+
+# Cheuk Ka didn't want NTC or PTC plotted, comment this out if needing statistics
+df <- df[df$Sample != "PC2",]
+df <- df[df$Sample != "NTC",]
+
+# MANUAL - have to set the different sample types
+#df$Sample = factor (df$Sample, c("20% below LoD", "LoD", "20% above LoD", "3x LoD", "WT Std High"))
+df$Sample = factor (df$Sample, c("20% below FF", "LoD FF", "20% above FF", "3x LoD FF", "WT Std High", "WT Std Low",
+				"20% below FFPE", "LoD FFPE", "20% above FFPE", "3x LoD FFPE" ))
+
+
+# MANUAL have to run twice, once for FFPE and once for fresh frozen. Must comment out FFPE to run fresh frozen and vice versa
+
+	#FFPE
+	df_FFPE <-  df[df$Sample %in% c("20% below FFPE", "LoD FFPE", "20% above FFPE", "3x LoD FFPE" ),]
+	folder = "C:\\Users\\ngpc4\\Documents\\FusionB\\Precision\\repeatability\\FFPE\\FFPE_"
+	df <- df_FFPE
+
+	# fresh frozen
+	#df_freshfrozen <- df[df$Sample %in% c("20% below FF", "LoD FF", "20% above FF", "3x LoD FF"),]
+	#folder = "C:\\Users\\ngpc4\\Documents\\FusionB\\Precision\\repeatability\\freshfrozen\\freshfrozen_"
+	#df <- df_freshfrozen
+
+
+df_TexasRed <- df[df$Fluor == "Texas Red", c("UniqueID", "Fluor",  "Sample", "Cq", "Run", "Well")]
+df_FAM <- df[df$Fluor == "FAM", c("UniqueID", "Fluor", "Target",  "Cq")]
+
+
+channels <- merge (df_TexasRed ,df_FAM, by="UniqueID")
+
+channels[,"deltaCq"] <- channels["Cq.y"] - channels["Cq.x"]
+
+ 
+#fakeit
+channels[,"Cq"] <- channels[,"deltaCq"]
+
+
+
+
+summary_all_data <- ddply (df, c('Fluor', 'Sample', "Run" ), .fun=summary_function)
+results_filename = paste (folder, "repeatability_summary_statistics.csv", sep="")
+write.csv(summary_all_data, file = results_filename,row.names=TRUE)
+
+summary_all_data <- ddply (df, c('Fluor', 'Sample'), .fun=summary_function)
+results_filename = paste (folder, "repeatability_summary_statistics_fewer_groups.csv", sep="")
+write.csv(summary_all_data, file = results_filename,row.names=TRUE)
+
+
+summary_deltaCq <- ddply (channels, c('Sample', "Run"), .fun=summary_function)
+results_filename = paste (folder, "repeatability_summary_statistics_deltaCq.csv", sep="")
+write.csv(summary_deltaCq, file = results_filename,row.names=TRUE)
+
+summary_deltaCq <- ddply (channels, c('Sample'), .fun=summary_function)
+results_filename = paste (folder, "repeatability_summary_statistics_deltaCq_fewer_groups.csv", sep="")
+write.csv(summary_deltaCq, file = results_filename,row.names=TRUE)
+
+
+
+# remove if more than 5 standard deviations --  MANUAL CHECK IF ROWS ARE REMOVED, check the last column of the csv files
+
+#source ("C:\\Users\\ngpc4\\Documents\\Biostatistics\\R_functions.R.txt")
+#df_no_outliers <- ddply (channels, c('Fluor', 'Sample'), .fun=outlier5stddev)
+# outliers by linear regression, 5 standard deviations
+
+
+
+
+
+#fusion_call <- ddply (channels, c('Sample', "Run", "Operator", "Batch", "Instrument"), .fun=binomial_function)
+#results_filename = paste (folder, "fusion_calls.csv", sep="")
+#write.csv (fusion_call, file=results_filename, row.names=TRUE)
+
+
+# FUSION CALL AGREEMENT - BINOMIAL 
+
+
+fusion_call <- ddply (channels, c('Sample'), .fun=binomial_function)
+results_filename = paste (folder, "fusion_calls_fewer_groups_CI.csv", sep="")
+write.csv (fusion_call, file=results_filename, row.names=TRUE)
+
+
+
+
+
+effects <- c("Run", "Well")
+
+for (effect in effects) {
+  plot_filename = paste (folder, effect ,"_effect_on_deltaCq.png", sep="")
+  png (plot_filename, width = 800, height = 600)
+
+  theplot <- ggplot(data = channels, aes(x=Sample, y=deltaCq)) + geom_boxplot(aes(fill= eval(as.name(effect))  )) + labs(x="",fill="",y=expression(paste(Delta, "Ct")), fill="") + theme(text = element_text(size=20))
+  
+
+  print (theplot)
+  dev.off()
+
+  summary_all_data <- ddply (channels, c('Sample', effect), .fun=summary_function)
+  fusion_call <- ddply (channels, c('Sample', effect), .fun=binomial_function)
+
+  results_filename = paste (folder, effect ,"_effect_on_deltaCq.csv", sep="")
+  write.table(summary_all_data, file = results_filename,row.names=FALSE, col.names=TRUE, quote=FALSE, sep=",")
+  write.table (fusion_call, file=results_filename, append=TRUE, row.names=FALSE, col.names=TRUE, quote=FALSE, sep=",")
+  
+
+
+
+}
+
+
+fluors = c("Texas Red", "FAM")
+for (fluor in fluors) {
+for (effect in effects) {
+
+	
+	subset_df <- df[df$Fluor == fluor,]
+	attach (subset_df)
+ 	anova_results <- anova (aov (Cq ~ factor (Sample) + factor (eval(as.name(effect)))))
+
+
+
+	  plot_filename = paste (folder, effect ,"_effect_on_", fluor, ".png", sep="")
+	  png (plot_filename, width = 800, height = 600)
+ 	 theplot <- ggplot(data = subset_df, aes(x=Sample, y=Cq)) + geom_boxplot(aes(fill= eval(as.name(effect))  )) + labs(x="",fill="", y="Ct") + theme(text = element_text(size=20)) 
+ 	 print (theplot)
+ 	 dev.off()
+
+}
+
+  summary_all_data <- ddply (subset_df, c('Sample', 'Fluor', effect), .fun=summary_function)
+  results_filename = paste (folder, effect ,"_effect_on_", fluor, ".csv", sep="")
+  write.table(summary_all_data, file = results_filename,row.names=FALSE, col.names=TRUE, quote=FALSE, sep=",")
+ 
+}
+
+library (car)
+
+  # ANOVA
+# do it by each factor, not enough data points to do it by all factors due to singular data points
+
+results_filename = paste (folder, "deltaCq_ANOVA.csv", sep="")  
+line = "no fixed blocking effects"
+cleaned_channels <- channels[!is.na(channels$deltaCq),]
+attach (cleaned_channels)
+anova_results <- Anova (aov (deltaCq ~ factor (Sample) ), type = "III", singular.ok=TRUE)
+anova_stats <- anova_stat_function (anova_results)
+write (line, file = results_filename)
+write.table (anova_results, file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+write.table (anova_stats, file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+
+for (effect in effects){
+  results_filename = paste (folder, "deltaCq_ANOVA.csv", sep="")
+  cleaned_channels <- channels[!is.na(channels$deltaCq),]
+  attach (cleaned_channels)
+# changed from additive + to interaction *
+  anova_results <- Anova (aov (deltaCq ~ factor (Sample) * factor ( eval (as.name (effect)) ),  data=cleaned_channels), type = "III", singular.ok=TRUE)
+  anova_stats <- anova_stat_function (anova_results)
+  write (paste ("####\n",effect,"\n",sep=""), file=results_filename, append=TRUE)
+  write.table (anova_results, file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+  write.table (anova_stats, file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+}
+
+
+for (fluor in fluors) {
+results_filename = paste (folder, fluor, "_Cq_ANOVA.csv", sep="")
+subset_df <- df[df$Fluor == fluor,]
+attach (subset_df)
+line = "no fixed blocking effects"
+anova_results <- Anova (aov (Cq ~ factor (Sample), data=subset_df), type = "III", singular.ok=TRUE)
+anova_stats <- anova_stat_function (anova_results)
+write (line, file = results_filename)
+write.table (anova_results, file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+write.table (anova_stats, file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+
+
+
+for (effect in effects){
+
+
+  anova_results <- Anova (aov (Cq ~ factor (Sample) * factor (  eval (as.name (effect)) ) , data=subset_df), type = "III",  singular.ok=TRUE)
+  anova_stats <- anova_stat_function (anova_results)
+  write (paste ("####\n",effect,"\n",sep=""), file=results_filename, append=TRUE)
+  write.table (anova_results, file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+  write.table (anova_stats, file=results_filename, append=TRUE, row.names=TRUE, col.names=TRUE, quote=FALSE, sep=",")
+
+}
+}
+
