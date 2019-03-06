@@ -52,7 +52,7 @@ outlier5stddev <-  function (df) {
 # for oultlierKD
 #source("http://goo.gl/UUyEzD")
 
-#The outlier limits are calculated using the following formulas: Q1 – 1.5 x IQR and Q3 + 1.5 x IQR,
+#The outlier limits are calculated using the following formulas: Q1 â€“ 1.5 x IQR and Q3 + 1.5 x IQR,
 outlierKD <- function(dt, var) {
   var_name <- eval(substitute(var),eval(dt))
   tot <- sum(!is.na(var_name))
@@ -147,3 +147,169 @@ outlierKD_deltaCq <- function(dt) {
   #  return(invisible(var_name))
  # }
 }
+
+outlier_Last_Kandel <- function (dt) {
+
+ var_name <- eval(substitute(Cq),eval(dt))
+  tot <- sum(!is.na(var_name))
+  
+  m1 <- mean(dt$Cq, na.rm = T)
+  par(mfrow=c(2, 2), oma=c(0,0,3,0))
+  boxplot(var_name, main="With outliers")
+  hist(var_name, main="With outliers", xlab=NA, ylab=NA)
+  rows_to_remove <- auto_detect_outlier.fcn ( dt$Cq)
+  print ("outliers to remove ")
+  print (rows_to_remove)
+	if (is.null (rows_to_remove)) {
+		cleaned_dt <- dt
+		print ("no points removed")
+		num_outliers <- 0
+	} else {
+		cleaned_dt <- dt[-rows_to_remove,]
+		print ("removing") 
+		print (dt[rows_to_remove,c("Run", "Well", "Cq")])
+		num_outliers <- length (rows_to_remove)
+
+		
+	}
+
+  boxplot(cleaned_dt$Cq, main="Without outliers")
+  hist(cleaned_dt$Cq, main="Without outliers", xlab=NA, ylab=NA)
+  title("Outlier Check", outer=TRUE)
+  
+  num_outliers <- 
+  message("Outliers identified: ", num_outliers , " from ", tot, " observations")
+  message("Proportion (%) of outliers: ", num_outliers / tot*100)
+ # message("Mean of the outliers: ", mo)
+  m2 <- mean(cleaned_dt$Cq, na.rm = T)
+  message("Mean without removing outliers: ", m1)
+  message("Mean if we remove outliers: ", m2)
+  
+ 
+  return (cleaned_dt)
+
+
+}
+
+
+#auto_detect_outlier.R
+auto_detect_outlier.fcn <- function(x,m =NULL,alpha =0.05, beta = NULL, dif.detect = 10) {
+# detect outliers in the vector v by comparing lag 1 difference to
+# lag m difference
+# dif.detect controls sensitivity to the relative distance magnitude. Default
+# value of 10 detects a relative magnitude of 10, e.g., a difference that is
+# 10 times the local average difference.
+## alpha controls the level of conformity that is deemed to be outlying. Lower
+# values will cause fewer values to be recognized as outliers.
+# default value for m is at least 12 or ceiling(length(x)*0.025),
+# i.e., about 2.5% of data
+# function returns the indices of high outliers, or NULL if none are detected
+if(is.null(m)) m <- max(12, ceiling(length(x)*0.025))
+if(is.null(beta)) beta <- log(2/alpha -1)/dif.detect
+ord <- order(x)
+sx <- x[ord]
+tst <- tapply(sx, sx)
+tbx <- table(x)
+v<- unique(sx)
+nv <- length(v)
+nv1<- nv-1
+nm <- nv-m
+cfl <- cfh <- rep(1, nv)
+dif1 <- diff(v)
+difm <- (v[-(1:(m))]-v[1:nm]) /m
+cfh[(m+2):nv] <- 2/(1+exp(beta*dif1[(m+1):nv1]/(tbx[(m+2):nv]*difm[-nm])))
+idx <-which(cfh < alpha)
+if(length(idx)==0) return(NULL) else return(ord[match(min(idx):nv,tst)])
+}
+
+
+# CDF, percentile, & tolerance interval calculation
+cdf.tol.est.fcn <-function(z, conf=95,tolval=95,wt=NULL,vartype = "SRS",
+zrng=NULL,x=NULL, y=NULL ) {
+# z vector of observed values
+# conf a single value or a vector of confidence levels
+# tolval a single value or vector of percentile levels
+# wt a vector of same length as z with survey weight values. The default
+# value NULL results in equal weighting
+# vartype specifies type of variance calculation. Default uses the SRS
+# variance estimator (see package spsurvey documentation for more details)
+# the alternative is "Local" which uses the local variance estimator. If
+# the local estimator is used, x and y coordinates must be supplied.
+# zrng is vector of values at which the cdf is estimated. Default uses
+# the sorted unique values of z
+# x, y are coordinates of the z observations. Only needed if vartype = "Local"
+#
+# gets estimate of the cumulative distribution function, its standard deviation,
+# and 1-sided lower confidence limits.
+# Also estimates percentiles and upper tolerance limits
+# confidence limits will be estimated for all levels specified in conf
+# Returned value is a list with components "CDF" and "tol". CDF is a matrix
+# with values of the cdf and upper confidence limits; tol is a three dimensional
+# array row = percentile, column = tolerance limits, and sheet = confidence
+#
+if(vartype =="Local" & (is.null(x) | is.null(y) )) {
+return("x & y coordinates must be supplied for local variance estimator")
+}
+conf <- conf/100
+tolval <- tolval/100
+n <- length(z)
+if(is.null(zrng)) zrng <- sort(unique(z))
+m <- length(zrng)
+ym <- matrix(rep(zrng, n), nrow = n, byrow = T)
+zm <- matrix(rep(z, m), nrow = n)
+if(is.null(wt)) wt <- rep(1, length(z))
+wm <- matrix(rep(wt, m), nrow = n)
+cdf <- apply(ifelse(zm <= ym, wm, 0), 2, sum)/sum(wt)
+tw2 <- (sum(wt))^2
+im <- ifelse(matrix(rep(z, m), nrow = n) <= matrix(rep(zrng, n), nrow = n,
+byrow = T), 1, 0)
+rm <- (im - matrix(rep(cdf, n), nrow = n, byrow = T)) * matrix(rep(wt, m),
+nrow = n)
+if (vartype == "Local") {
+weight.lst <- localmean.weight(x, y, 1/wt)
+varest <- apply(rm, 2, localmean.var, weight.lst)/tw2
+} else {
+varest <- n * apply(rm, 2, var) / tw2
+}
+sd <- sqrt(varest)
+mult <- qnorm(conf)
+cint <- matrix(0,nrow =m,ncol=length(mult))
+for(i in 1:length(mult)) {
+cint[,i] <- pmax(0,cdf - sd*mult[i])
+}
+CDF <- cbind(cbind(zrng, cdf, sd, cint) )
+dnm <- paste(100*conf, "%UCB",sep = "")
+dimnames(CDF) <- list(NULL, c("Value", "CDF", "SD",as.vector(t(dnm))))
+tol <- array(0, c(length(tolval), 2,length(conf)))
+dimnames(tol) <- list(100*tolval, c("PCT","UPPER TL"),100*conf)
+for (j in 1:length(conf)) {
+tol[,,j] <- pctol.est.fcn(cbind(zrng, cdf,cint[,j]),tolval)
+}
+list(cdf =CDF, tol=tol)
+}
+
+
+pctol.est.fcn <- function(cdfest, tolpct) {
+# calculates percentile & upper tolerance liimit
+# input is estimated cdf with upper confidence limit, and vector of percentiles
+rslt <- matrix(0, nrow=length(tolpct),ncol=2)
+for(i in 2:3) {
+for (j in 1:length(tolpct)) {
+hdx <- which(cdfest[,i] >= tolpct[j])
+high <- ifelse(length(hdx) >0, min(hdx), NA)
+ldx <- which(cdfest[,i] <= tolpct[j])
+low <- ifelse(length(ldx) >0, max(ldx), NA)
+if (is.na(high)) {
+rslt[j,i-1] <- NA
+} else if (is.na(low)) {
+rslt[j,i-1] <- cdfest[high,1]
+} else {
+if (high > low)
+ival <- (tolpct[j] - cdfest[low,i])/ (cdfest[high,i] - cdfest[low,i])
+else ival <- 1
+rslt[j,i-1] <- ival * cdfest[high,1] + (1 - ival) * cdfest[low,1]
+}
+}} 
+rslt
+}
+
