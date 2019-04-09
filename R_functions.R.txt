@@ -157,7 +157,8 @@ outlier_Last_Kandel <- function (dt) {
   par(mfrow=c(2, 2), oma=c(0,0,3,0))
   boxplot(var_name, main="With outliers")
   hist(var_name, main="With outliers", xlab=NA, ylab=NA)
-  rows_to_remove <- auto_detect_outlier.fcn ( dt$Cq)
+# 12 was the default according to https://www.sfei.org/sites/default/files/biblio_files/Stevens_ThresholdCalculationReport_May2011.pdf
+  rows_to_remove <- auto_detect_outlier.fcn ( dt$Cq, 12)
   print ("outliers to remove ")
   print (rows_to_remove)
 	if (is.null (rows_to_remove)) {
@@ -192,8 +193,55 @@ outlier_Last_Kandel <- function (dt) {
 }
 
 
+outlier_Last_Kandel_m20 <- function (dt) {
+
+ var_name <- eval(substitute(Cq),eval(dt))
+  tot <- sum(!is.na(var_name))
+  
+  m1 <- mean(dt$Cq, na.rm = T)
+  par(mfrow=c(2, 2), oma=c(0,0,3,0))
+  boxplot(var_name, main="With outliers")
+  hist(var_name, main="With outliers", xlab=NA, ylab=NA)
+# Pauline changed to 20. this is the # of points used to estimate m. why not more points, right?
+  rows_to_remove <- auto_detect_outlier.fcn ( dt$Cq, 20)
+  print ("outliers to remove ")
+  print (rows_to_remove)
+	if (is.null (rows_to_remove)) {
+		cleaned_dt <- dt
+		print ("no points removed")
+		num_outliers <- 0
+	} else {
+		cleaned_dt <- dt[-rows_to_remove,]
+		print ("removing") 
+		print (dt[rows_to_remove,c("Run", "Well", "Cq")])
+		num_outliers <- length (rows_to_remove)
+
+		
+	}
+
+  boxplot(cleaned_dt$Cq, main="Without outliers")
+  hist(cleaned_dt$Cq, main="Without outliers", xlab=NA, ylab=NA)
+  title("Outlier Check", outer=TRUE)
+  
+  num_outliers <- 
+  message("Outliers identified: ", num_outliers , " from ", tot, " observations")
+  message("Proportion (%) of outliers: ", num_outliers / tot*100)
+ # message("Mean of the outliers: ", mo)
+  m2 <- mean(cleaned_dt$Cq, na.rm = T)
+  message("Mean without removing outliers: ", m1)
+  message("Mean if we remove outliers: ", m2)
+  
+ 
+  return (cleaned_dt)
+
+
+}
+
+
+
 #auto_detect_outlier.R
-auto_detect_outlier.fcn <- function(x,m =NULL,alpha =0.05, beta = NULL, dif.detect = 10) {
+# original code
+auto_detect_outlier.fcn <- function(x,max_m, m =NULL,alpha =0.05, beta = NULL, dif.detect = 10) {
 # detect outliers in the vector v by comparing lag 1 difference to
 # lag m difference
 # dif.detect controls sensitivity to the relative distance magnitude. Default
@@ -204,7 +252,7 @@ auto_detect_outlier.fcn <- function(x,m =NULL,alpha =0.05, beta = NULL, dif.dete
 # default value for m is at least 12 or ceiling(length(x)*0.025),
 # i.e., about 2.5% of data
 # function returns the indices of high outliers, or NULL if none are detected
-if(is.null(m)) m <- max(12, ceiling(length(x)*0.025))
+if(is.null(m)) m <- max(max_m, ceiling(length(x)*0.025))
 if(is.null(beta)) beta <- log(2/alpha -1)/dif.detect
 ord <- order(x)
 sx <- x[ord]
@@ -221,6 +269,12 @@ cfh[(m+2):nv] <- 2/(1+exp(beta*dif1[(m+1):nv1]/(tbx[(m+2):nv]*difm[-nm])))
 idx <-which(cfh < alpha)
 if(length(idx)==0) return(NULL) else return(ord[match(min(idx):nv,tst)])
 }
+
+#https://www.sfei.org/sites/default/files/biblio_files/Stevens_ThresholdCalculationReport_May2011.pdf
+
+#auto_detect_outlier.R
+# Pauline added max_m parameter so can pass in  20 (use 20 points not 12 points to calculate difference.
+# just gives more data/points -- why not use 20?
 
 
 # CDF, percentile, & tolerance interval calculation
