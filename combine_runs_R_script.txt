@@ -1,0 +1,34 @@
+# SET RUN folder
+#folder = "C:\\Users\\ngpc4\\Documents\\FusionB\\LoD\\Fusion\ B_Clinical_CLoD\\data\\"
+
+folder = "C:\\Users\\ngpc4\\Documents\\FusionC\\RunControl\\data\\"
+outfolder = "C:\\Users\\ngpc4\\Documents\\FusionC\\RunControl\\"
+
+
+
+csv_files =  list.files (path=folder, pattern=".csv")
+
+
+col_names <- c("Run", "Well", "Fluor","Target",	"Content","Sample","Biological.Set.Name","Cq","Cq.Mean","Cq.Std..Dev","Starting.Quantity..SQ.",
+"Log.Starting.Quantity","SQ.Mean","SQ.Std..Dev","Set.Point","Well.Note")
+all_df <- data.frame(matrix(ncol = 16, nrow = 0))
+colnames(all_df) <- col_names
+
+ 
+for (file_basename in csv_files) {
+	print (file_basename)
+	filename <- paste (folder,file_basename,  sep="")
+	df <- read.csv (filename, header=TRUE)
+	print (nrow (df))
+	fields = strsplit (file_basename, ".csv")
+	print (fields[1])
+	df[,"Run"] = fields[1]  #comment out whether or not to assign Runs
+	df$X <- NULL
+	all_df <- rbind (all_df, df)
+}
+
+all_filename <- paste (outfolder, "combined.csv", sep="")
+write.csv (all_df, file = all_filename, row.names=FALSE)
+
+# check true
+length (csv_files) * nrow (df) == nrow (all_df)
